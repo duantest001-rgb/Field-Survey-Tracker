@@ -510,7 +510,13 @@ async function saveRecord() {
       payload.customer_type = document.getElementById('f-business').value.trim();
       payload.budget = document.getElementById('f-budget').value.trim();
     }
-    if (photoUrl) payload.photo_url = photoUrl;
+    if (photoUrl) {
+      payload.photo_url = photoUrl;
+    } else if (id) {
+      // ຮັກສາຮູບເກົ່າ — ບໍ່ overwrite
+      const existing = allData[currentTab].find(r => r.id === id);
+      if (existing?.photo_url) payload.photo_url = existing.photo_url;
+    }
 
     const { error } = id
       ? await sb.from(table).update(payload).eq('id', id)
@@ -559,9 +565,12 @@ function renderList() {
   container.innerHTML = data.map(rec => {
     const typeFld = currentTab === 'partner' ? rec.business_type : rec.customer_type;
     const extra = currentTab === 'customer' && rec.budget ? `💰 ${rec.budget}` : '';
+    const photoHtml = rec.photo_url
+      ? `<img src="${rec.photo_url}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:8px;" onerror="this.style.display='none'"/>`
+      : '';
     return `<div class="record-card">
       <div class="record-card-header">
-        <div>
+        <div style="flex:1;min-width:0;">
           <div class="record-name">${rec.name}</div>
           <div class="record-info">📞 ${rec.phone || '-'}</div>
           ${typeFld ? `<div class="record-info">🏪 ${typeFld}</div>` : ''}
@@ -570,10 +579,11 @@ function renderList() {
         </div>
         <span class="status-badge status-${rec.status}">${STATUS_LABELS[rec.status]||rec.status}</span>
       </div>
-      ${rec.notes ? `<div class="record-info" style="margin-top:4px; font-style:italic;">💬 ${rec.notes}</div>` : ''}
+      ${rec.notes ? `<div class="record-info" style="margin-top:4px;font-style:italic;">💬 ${rec.notes}</div>` : ''}
+      ${photoHtml}
       <div class="record-actions">
         <button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>
-        ${rec.lat ? `<button class="btn-sm" onclick="flyTo(${rec.lat},${rec.lng})">🗺️ ເບິ່ງແຜນທີ່</button>` : ''}
+        ${rec.lat ? `<button class="btn-sm" onclick="flyTo(${rec.lat},${rec.lng})">🗺️ ແຜນທີ່</button>` : ''}
         <button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️</button>
       </div>
     </div>`;
@@ -681,7 +691,11 @@ function openEditModal(id) {
   document.getElementById('modal-title').textContent = currentTab === 'partner' ? 'ແກ້ໄຂ Partner' : 'ແກ້ໄຂ ລູກຄ້າ';
   document.getElementById('modal').classList.add('open');
 }
-function closeModal() { document.getElementById('modal').classList.remove('open'); }
+function closeModal() {
+  document.getElementById('modal').classList.remove('open');
+  editPhotoFile = null;
+  document.getElementById('f-photo').value = '';
+}
 
 function renderStatusSelector() {
   const opts = STATUS_CONFIG[currentTab];
@@ -736,6 +750,11 @@ function handlePhoto(input) {
 document.getElementById('modal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
+
+// ປ້ອງກັນ scroll ຄ້າງ
+document.getElementById('modal').addEventListener('touchmove', function(e) {
+  if (e.target === this) e.preventDefault();
+}, { passive: false });
 </script>
 </body>
 </html>
