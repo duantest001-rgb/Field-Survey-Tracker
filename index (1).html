@@ -131,6 +131,16 @@
   @keyframes spin { to { transform: rotate(360deg); } }
 
   .hidden { display: none !important; }
+
+  /* TOAST */
+  .toast { position: fixed; bottom: 5rem; left: 50%; transform: translateX(-50%); padding: 0.75rem 1.5rem; border-radius: var(--radius); font-size: 0.9rem; font-weight: 600; z-index: 9999; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
+  .toast.show { opacity: 1; }
+  .toast.success { background: var(--green); color: #fff; }
+  .toast.error { background: var(--red); color: #fff; }
+  .toast.info { background: var(--text); color: #fff; }
+
+  /* SAVE LOADING */
+  .btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -216,6 +226,9 @@
 
   <button class="fab" onclick="openAddModal()">+</button>
 </div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
 
 <!-- ADD/EDIT MODAL -->
 <div class="modal-overlay" id="modal">
@@ -316,6 +329,14 @@ const MARKER_COLORS = {
   joined: '#1D9E75', interested: '#1D9E75',
   considering: '#BA7517', not_interested: '#E24B4A'
 };
+
+// ===== TOAST =====
+function showToast(msg, type = 'success', duration = 3000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => { t.className = 'toast'; }, duration);
+}
 
 // ===== AUTH =====
 sb.auth.onAuthStateChange((event, session) => {
@@ -428,38 +449,63 @@ async function saveRecord() {
   const notes = document.getElementById('f-notes').value.trim();
   const status = document.querySelector('.status-opt.selected')?.dataset.val;
 
-  if (!name) { alert('ກະລຸນາໃສ່ຊື່'); return; }
+  if (!name) { showToast('⚠️ ກະລຸນາໃສ່ຊື່ກ່ອນ', 'error'); return; }
+  if (!phone) { showToast('⚠️ ກະລຸນາໃສ່ເບີໂທກ່ອນ', 'error'); return; }
 
-  let photoUrl = null;
-  if (editPhotoFile) photoUrl = await uploadPhoto(editPhotoFile);
+  const saveBtn = document.querySelector('.btn-save');
+  saveBtn.disabled = true;
+  saveBtn.textContent = '⏳ ກຳລັງບັນທຶກ...';
 
-  const table = currentTab === 'partner' ? 'partners' : 'customers';
-  const { data: { user } } = await sb.auth.getUser();
+  try {
+    let photoUrl = null;
+    if (editPhotoFile) {
+      showToast('📷 ກຳລັງອັບໂຫຼດຮູບ...', 'info');
+      photoUrl = await uploadPhoto(editPhotoFile);
+    }
 
-  const payload = {
-    name, phone, notes, status,
-    lat: editLat, lng: editLng, location_name: document.getElementById('loc-status').textContent,
-    created_by: user.id
-  };
-  if (currentTab === 'partner') payload.business_type = document.getElementById('f-business').value.trim();
-  else { payload.customer_type = document.getElementById('f-business').value.trim(); payload.budget = document.getElementById('f-budget').value.trim(); }
-  if (photoUrl) payload.photo_url = photoUrl;
+    const table = currentTab === 'partner' ? 'partners' : 'customers';
+    const { data: { user } } = await sb.auth.getUser();
 
-  if (id) {
-    await sb.from(table).update(payload).eq('id', id);
-  } else {
-    await sb.from(table).insert(payload);
+    const payload = {
+      name, phone, notes, status,
+      lat: editLat, lng: editLng,
+      location_name: document.getElementById('loc-status').textContent,
+      created_by: user.id
+    };
+    if (currentTab === 'partner') {
+      payload.business_type = document.getElementById('f-business').value.trim();
+    } else {
+      payload.customer_type = document.getElementById('f-business').value.trim();
+      payload.budget = document.getElementById('f-budget').value.trim();
+    }
+    if (photoUrl) payload.photo_url = photoUrl;
+
+    const { error } = id
+      ? await sb.from(table).update(payload).eq('id', id)
+      : await sb.from(table).insert(payload);
+
+    if (error) throw error;
+
+    closeModal();
+    showToast(id ? '✅ ແກ້ໄຂສຳເລັດ!' : '✅ ເພີ່ມຂໍ້ມູນສຳເລັດ!', 'success');
+    await loadAll();
+
+  } catch (err) {
+    console.error(err);
+    showToast('❌ ເກີດຂໍ້ຜິດພາດ: ' + (err.message || 'ກະລຸນາລອງໃໝ່'), 'error', 5000);
+  } finally {
+    saveBtn.disabled = false;
+    saveBtn.textContent = '💾 ບັນທຶກ';
   }
-
-  closeModal();
-  await loadAll();
 }
 
 async function deleteRecord(id) {
   if (!confirm('ທ່ານຕ້ອງການລຶບລາຍການນີ້ບໍ?')) return;
   const table = currentTab === 'partner' ? 'partners' : 'customers';
-  await sb.from(table).delete().eq('id', id);
+  const { error } = await sb.from(table).delete().eq('id', id);
   document.querySelectorAll('.leaflet-popup-close-button').forEach(b => b.click());
+  if (error) { showToast('❌ ລຶບບໍ່ສຳເລັດ', 'error'); return; }
+  showToast('🗑️ ລຶບສຳເລັດ', 'success');
   await loadAll();
 }
 
