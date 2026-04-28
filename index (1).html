@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="lo">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Field Survey Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --green: #1D9E75; --green-light: #E1F5EE; --green-dark: #085041;
+    --amber: #BA7517; --amber-light: #FAEEDA;
+    --red: #E24B4A; --red-light: #FCEBEB;
+    --blue: #378ADD; --blue-light: #E6F1FB;
+    --gray: #888780; --gray-light: #F1EFE8;
+    --text: #2C2C2A; --text2: #5F5E5A; --text3: #888780;
+    --bg: #fff; --bg2: #F1EFE8; --border: #D3D1C7;
+    --radius: 12px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: 'Noto Sans Lao', sans-serif, system-ui; background: var(--bg2); color: var(--text); min-height: 100vh; }
+
+  /* AUTH */
+  #auth-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 2rem; background: var(--bg2); }
+  .auth-logo { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  .auth-title { font-size: 1.4rem; font-weight: 700; color: var(--text); margin-bottom: 0.25rem; }
+  .auth-sub { font-size: 0.85rem; color: var(--text2); margin-bottom: 2rem; }
+  .auth-card { background: var(--bg); border-radius: var(--radius); padding: 1.5rem; width: 100%; max-width: 360px; border: 1px solid var(--border); }
+  .auth-card input { width: 100%; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 1rem; margin-bottom: 0.75rem; font-family: inherit; }
+  .auth-card input:focus { outline: none; border-color: var(--green); }
+  .btn-primary { width: 100%; padding: 0.85rem; background: var(--green); color: #fff; border: none; border-radius: var(--radius-sm); font-size: 1rem; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .btn-primary:active { opacity: 0.85; }
+  .auth-toggle { text-align: center; margin-top: 1rem; font-size: 0.85rem; color: var(--text2); }
+  .auth-toggle span { color: var(--green); cursor: pointer; font-weight: 600; }
+  .auth-msg { font-size: 0.8rem; color: var(--red); text-align: center; margin-top: 0.5rem; min-height: 1.2rem; }
+
+  /* APP */
+  #app { display: none; flex-direction: column; height: 100vh; }
+
+  /* TOP BAR */
+  .topbar { background: var(--bg); border-bottom: 1px solid var(--border); padding: 0.6rem 1rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1000; }
+  .topbar-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
+  .icon-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 0.8rem; color: var(--text2); cursor: pointer; }
+
+  /* TABS */
+  .tabs { display: flex; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .tab { flex: 1; padding: 0.75rem; text-align: center; font-size: 0.9rem; font-weight: 600; color: var(--text3); cursor: pointer; border-bottom: 3px solid transparent; transition: all 0.2s; }
+  .tab.active { color: var(--green); border-bottom-color: var(--green); }
+
+  /* VIEW TOGGLE */
+  .view-toggle { display: flex; gap: 6px; padding: 0.6rem 1rem; background: var(--bg); border-bottom: 1px solid var(--border); }
+  .view-btn { flex: 1; padding: 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg2); font-size: 0.8rem; color: var(--text2); cursor: pointer; text-align: center; }
+  .view-btn.active { background: var(--green); color: #fff; border-color: var(--green); }
+
+  /* MAP */
+  #map { width: 100%; flex: 1; }
+  .map-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+
+  /* LIST VIEW */
+  .list-view { flex: 1; overflow-y: auto; padding: 0.75rem; display: none; gap: 0.6rem; flex-direction: column; }
+  .record-card { background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border); padding: 1rem; position: relative; }
+  .record-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.5rem; }
+  .record-name { font-weight: 700; font-size: 1rem; color: var(--text); }
+  .status-badge { font-size: 0.7rem; font-weight: 700; padding: 3px 8px; border-radius: 20px; white-space: nowrap; }
+  .status-joined, .status-interested { background: var(--green-light); color: var(--green-dark); }
+  .status-considering { background: var(--amber-light); color: var(--amber); }
+  .status-not_interested { background: var(--red-light); color: var(--red); }
+  .record-info { font-size: 0.82rem; color: var(--text2); margin-top: 3px; }
+  .record-actions { display: flex; gap: 6px; margin-top: 0.75rem; }
+  .btn-sm { padding: 5px 12px; border-radius: var(--radius-sm); font-size: 0.78rem; border: 1px solid var(--border); background: var(--bg2); color: var(--text2); cursor: pointer; font-family: inherit; }
+  .btn-sm.danger { color: var(--red); border-color: #F0959580; }
+  .btn-sm.primary { color: var(--green); border-color: var(--green); background: var(--green-light); }
+
+  /* DASHBOARD */
+  .dash-view { display: none; flex: 1; overflow-y: auto; padding: 0.75rem; flex-direction: column; gap: 0.6rem; }
+  .dash-section { background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border); padding: 1rem; }
+  .dash-section-title { font-size: 0.8rem; color: var(--text3); font-weight: 600; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-card { background: var(--bg2); border-radius: var(--radius-sm); padding: 0.75rem; text-align: center; }
+  .stat-num { font-size: 1.6rem; font-weight: 800; color: var(--text); }
+  .stat-label { font-size: 0.72rem; color: var(--text2); margin-top: 2px; }
+  .status-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  .status-row:last-child { border-bottom: none; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+  .dot-green { background: var(--green); }
+  .dot-amber { background: var(--amber); }
+  .dot-red { background: var(--red); }
+
+  /* MODAL */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 2000; display: none; align-items: flex-end; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--bg); border-radius: var(--radius) var(--radius) 0 0; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; padding: 1.25rem; padding-bottom: 2rem; }
+  .modal-handle { width: 40px; height: 4px; background: var(--border); border-radius: 2px; margin: 0 auto 1rem; }
+  .modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 1rem; color: var(--text); }
+  .field-group { margin-bottom: 0.85rem; }
+  .field-label { font-size: 0.8rem; color: var(--text2); margin-bottom: 4px; font-weight: 600; }
+  .field-input { width: 100%; padding: 0.7rem 0.85rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.95rem; font-family: inherit; color: var(--text); background: var(--bg); }
+  .field-input:focus { outline: none; border-color: var(--green); }
+  textarea.field-input { resize: vertical; min-height: 70px; }
+  .status-selector { display: flex; gap: 6px; }
+  .status-opt { flex: 1; padding: 0.6rem; border: 1.5px solid var(--border); border-radius: var(--radius-sm); text-align: center; font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+  .status-opt[data-val="joined"], .status-opt[data-val="interested"] { color: var(--green-dark); }
+  .status-opt[data-val="joined"].selected, .status-opt[data-val="interested"].selected { background: var(--green-light); border-color: var(--green); }
+  .status-opt[data-val="considering"].selected { background: var(--amber-light); border-color: var(--amber); color: var(--amber); }
+  .status-opt[data-val="not_interested"].selected { background: var(--red-light); border-color: var(--red); color: var(--red); }
+  .location-pick { display: flex; gap: 6px; }
+  .btn-loc { flex: 1; padding: 0.65rem; border: 1px solid var(--green); border-radius: var(--radius-sm); background: var(--green-light); color: var(--green-dark); font-size: 0.82rem; font-weight: 600; cursor: pointer; text-align: center; font-family: inherit; }
+  .loc-status { font-size: 0.75rem; color: var(--text2); margin-top: 4px; }
+  .photo-preview { width: 80px; height: 80px; border-radius: var(--radius-sm); object-fit: cover; border: 1px solid var(--border); }
+  .photo-upload-btn { padding: 0.6rem 1rem; border: 1.5px dashed var(--border); border-radius: var(--radius-sm); background: var(--bg2); color: var(--text2); font-size: 0.82rem; cursor: pointer; text-align: center; font-family: inherit; width: 100%; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 1rem; }
+  .btn-cancel { flex: 1; padding: 0.8rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg2); color: var(--text2); font-size: 0.9rem; cursor: pointer; font-family: inherit; }
+  .btn-save { flex: 2; padding: 0.8rem; background: var(--green); color: #fff; border: none; border-radius: var(--radius-sm); font-size: 0.9rem; font-weight: 700; cursor: pointer; font-family: inherit; }
+
+  /* FAB */
+  .fab { position: fixed; bottom: 1.5rem; right: 1.25rem; width: 56px; height: 56px; background: var(--green); border-radius: 50%; border: none; color: #fff; font-size: 1.6rem; cursor: pointer; z-index: 900; box-shadow: 0 4px 16px rgba(29,158,117,0.4); display: flex; align-items: center; justify-content: center; }
+  .fab:active { transform: scale(0.95); }
+
+  /* MAP MARKER POPUP */
+  .leaflet-popup-content { margin: 0 !important; }
+  .map-popup { padding: 0.75rem; min-width: 200px; }
+  .map-popup-name { font-weight: 700; font-size: 0.95rem; margin-bottom: 4px; }
+  .map-popup-info { font-size: 0.78rem; color: var(--text2); margin-bottom: 4px; }
+  .map-popup-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+  /* LOADING */
+  .loading { text-align: center; padding: 2rem; color: var(--text3); font-size: 0.9rem; }
+  .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin 0.7s linear infinite; margin-bottom: 8px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- AUTH SCREEN -->
+<div id="auth-screen">
+  <div class="auth-logo">📍</div>
+  <div class="auth-title">Field Survey Tracker</div>
+  <div class="auth-sub">ລະບົບຕິດຕາມການສຳຫຼວດພື້ນທີ່</div>
+  <div class="auth-card">
+    <div id="auth-form-login">
+      <input type="email" id="auth-email" placeholder="Email" autocomplete="email"/>
+      <input type="password" id="auth-pass" placeholder="Password" autocomplete="current-password"/>
+      <button class="btn-primary" onclick="doLogin()">ເຂົ້າສູ່ລະບົບ</button>
+      <div class="auth-msg" id="auth-msg"></div>
+      <div class="auth-toggle">ຍັງບໍ່ມີບັນຊີ? <span onclick="toggleAuth()">ລົງທະບຽນ</span></div>
+    </div>
+    <div id="auth-form-register" style="display:none">
+      <input type="email" id="reg-email" placeholder="Email" autocomplete="email"/>
+      <input type="password" id="reg-pass" placeholder="Password (ຢ່າງໜ້ອຍ 6 ຕົວ)" autocomplete="new-password"/>
+      <button class="btn-primary" onclick="doRegister()">ລົງທະບຽນ</button>
+      <div class="auth-msg" id="reg-msg"></div>
+      <div class="auth-toggle">ມີບັນຊີແລ້ວ? <span onclick="toggleAuth()">ເຂົ້າສູ່ລະບົບ</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <div class="topbar">
+    <div class="topbar-title">📍 Survey Tracker</div>
+    <div class="topbar-right">
+      <button class="icon-btn" onclick="showDash()">📊 ສະຫຼຸບ</button>
+      <button class="icon-btn" onclick="doLogout()">ອອກ</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" id="tab-partner" onclick="switchTab('partner')">🤝 Partner</div>
+    <div class="tab" id="tab-customer" onclick="switchTab('customer')">👤 ລູກຄ້າ</div>
+  </div>
+
+  <div class="view-toggle">
+    <button class="view-btn active" id="vbtn-map" onclick="switchView('map')">🗺️ ແຜນທີ່</button>
+    <button class="view-btn" id="vbtn-list" onclick="switchView('list')">📋 ລາຍການ</button>
+  </div>
+
+  <!-- MAP VIEW -->
+  <div class="map-view" id="map-view">
+    <div id="map"></div>
+  </div>
+
+  <!-- LIST VIEW -->
+  <div class="list-view" id="list-view">
+    <div class="loading" id="list-loading"><div class="spinner"></div><br>ກຳລັງໂຫຼດ...</div>
+    <div id="list-items"></div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div class="dash-view" id="dash-view">
+    <div class="dash-section">
+      <div class="dash-section-title">ສະຫຼຸບລວມ</div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-num" id="dash-today-p">0</div><div class="stat-label">Partner ມື້ນີ້</div></div>
+        <div class="stat-card"><div class="stat-num" id="dash-today-c">0</div><div class="stat-label">ລູກຄ້າ ມື້ນີ້</div></div>
+        <div class="stat-card"><div class="stat-num" id="dash-month-p">0</div><div class="stat-label">Partner ເດືອນນີ້</div></div>
+        <div class="stat-card"><div class="stat-num" id="dash-month-c">0</div><div class="stat-label">ລູກຄ້າ ເດືອນນີ້</div></div>
+      </div>
+    </div>
+    <div class="dash-section">
+      <div class="dash-section-title">Partner ຕາມສະຖານະ</div>
+      <div id="dash-partner-status"></div>
+    </div>
+    <div class="dash-section">
+      <div class="dash-section-title">ລູກຄ້າ ຕາມສະຖານະ</div>
+      <div id="dash-customer-status"></div>
+    </div>
+    <div class="dash-section">
+      <div class="dash-section-title">ລາຍການລ່າສຸດ</div>
+      <div id="dash-recent"></div>
+    </div>
+  </div>
+
+  <button class="fab" onclick="openAddModal()">+</button>
+</div>
+
+<!-- ADD/EDIT MODAL -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="modal-title">ເພີ່ມ Partner</div>
+
+    <input type="hidden" id="edit-id"/>
+
+    <div class="field-group">
+      <div class="field-label">ຊື່ / ຊື່ບໍລິສັດ *</div>
+      <input type="text" class="field-input" id="f-name" placeholder="ກະລຸນາໃສ່ຊື່"/>
+    </div>
+    <div class="field-group">
+      <div class="field-label">ເບີໂທ *</div>
+      <input type="tel" class="field-input" id="f-phone" placeholder="020 xx xxx xxx"/>
+    </div>
+    <div class="field-group" id="fg-business">
+      <div class="field-label" id="business-label">ປະເພດທຸລະກິດ / ສິນຄ້າທີ່ຂາຍ</div>
+      <input type="text" class="field-input" id="f-business" placeholder="ເຊັ່ນ: ຮ້ານຂາຍຢາ, ຮ້ານອາຫານ..."/>
+    </div>
+    <div class="field-group hidden" id="fg-budget">
+      <div class="field-label">ງົບປະມານ (Budget)</div>
+      <input type="text" class="field-input" id="f-budget" placeholder="ເຊັ່ນ: 5-10 ລ້ານ ກີບ"/>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">ສະຖານະ</div>
+      <div class="status-selector" id="status-selector"></div>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">ໝາຍເຫດ</div>
+      <textarea class="field-input" id="f-notes" placeholder="ບັນທຶກເພີ່ມເຕີມ..."></textarea>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">📍 Location</div>
+      <div class="location-pick">
+        <button class="btn-loc" onclick="useCurrentLocation()">📡 ໃຊ້ GPS ປັດຈຸບັນ</button>
+        <button class="btn-loc" onclick="pickOnMap()">🗺️ ເລືອກໃນແຜນທີ່</button>
+      </div>
+      <div class="loc-status" id="loc-status">ຍັງບໍ່ໄດ້ເລືອກ location</div>
+    </div>
+
+    <div class="field-group">
+      <div class="field-label">ຮູບຖ່າຍ</div>
+      <input type="file" id="f-photo" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(this)"/>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button class="photo-upload-btn" onclick="document.getElementById('f-photo').click()">📷 ອັບໂຫຼດຮູບ / ຖ່າຍຮູບ</button>
+        <img id="photo-preview" class="photo-preview hidden" src="" alt="preview"/>
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">ຍົກເລີກ</button>
+      <button class="btn-save" onclick="saveRecord()">💾 ບັນທຶກ</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== CONFIG — ໃສ່ຄ່າ Supabase ຂອງທ່ານ =====
+const SUPABASE_URL = 'https://xtzlhrgxbeqiwsighhcp.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0emxocmd4YmVxaXdzaWdoaGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNTMzOTksImV4cCI6MjA5MjkyOTM5OX0.NuP-bJrGbCHKUlpm3o_2aRCGxBPjgiYzdZfGkqYGySA';
+// ================================================
+
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+let currentTab = 'partner';
+let currentView = 'map';
+let leafletMap = null;
+let markers = {};
+let allData = { partner: [], customer: [] };
+let editLat = null, editLng = null;
+let editPhotoFile = null;
+let pickingLocation = false;
+
+// ===== STATUS CONFIG =====
+const STATUS_CONFIG = {
+  partner: [
+    { val: 'joined', label: '🟢 ເຂົ້າຮ່ວມ' },
+    { val: 'considering', label: '🟡 ພິຈາລະນາ' },
+    { val: 'not_interested', label: '🔴 ບໍ່ສົນໃຈ' }
+  ],
+  customer: [
+    { val: 'interested', label: '🟢 ສົນໃຈ' },
+    { val: 'considering', label: '🟡 ພິຈາລະນາ' },
+    { val: 'not_interested', label: '🔴 ບໍ່ສົນໃຈ' }
+  ]
+};
+const STATUS_LABELS = {
+  joined: 'ເຂົ້າຮ່ວມ', interested: 'ສົນໃຈ',
+  considering: 'ພິຈາລະນາ', not_interested: 'ບໍ່ສົນໃຈ'
+};
+const MARKER_COLORS = {
+  joined: '#1D9E75', interested: '#1D9E75',
+  considering: '#BA7517', not_interested: '#E24B4A'
+};
+
+// ===== AUTH =====
+sb.auth.onAuthStateChange((event, session) => {
+  if (session) { showApp(); loadAll(); }
+  else { showAuth(); }
+});
+
+function showAuth() {
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  if (!leafletMap) initMap();
+}
+function toggleAuth() {
+  const isLogin = document.getElementById('auth-form-login').style.display !== 'none';
+  document.getElementById('auth-form-login').style.display = isLogin ? 'none' : 'block';
+  document.getElementById('auth-form-register').style.display = isLogin ? 'block' : 'none';
+}
+async function doLogin() {
+  const email = document.getElementById('auth-email').value;
+  const pass = document.getElementById('auth-pass').value;
+  const msg = document.getElementById('auth-msg');
+  msg.textContent = 'ກຳລັງເຂົ້າສູ່ລະບົບ...';
+  const { error } = await sb.auth.signInWithPassword({ email, password: pass });
+  msg.textContent = error ? 'Email ຫຼື Password ບໍ່ຖືກຕ້ອງ' : '';
+}
+async function doRegister() {
+  const email = document.getElementById('reg-email').value;
+  const pass = document.getElementById('reg-pass').value;
+  const msg = document.getElementById('reg-msg');
+  msg.textContent = 'ກຳລັງລົງທະບຽນ...';
+  const { error } = await sb.auth.signUp({ email, password: pass });
+  msg.textContent = error ? error.message : 'ລົງທະບຽນສຳເລັດ! ກວດ Email ທ່ານ';
+}
+async function doLogout() {
+  await sb.auth.signOut();
+}
+
+// ===== MAP =====
+function initMap() {
+  leafletMap = L.map('map').setView([17.97, 102.63], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap', maxZoom: 19
+  }).addTo(leafletMap);
+
+  leafletMap.on('click', (e) => {
+    if (pickingLocation) {
+      setModalLocation(e.latlng.lat, e.latlng.lng, 'ເລືອກຈາກແຜນທີ່');
+      pickingLocation = false;
+      leafletMap.getContainer().style.cursor = '';
+      document.getElementById('modal').classList.add('open');
+    }
+  });
+}
+
+function makeIcon(status) {
+  const color = MARKER_COLORS[status] || '#888780';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
+    <path d="M14 0C6.27 0 0 6.27 0 14c0 9.47 14 22 14 22S28 23.47 28 14C28 6.27 21.73 0 14 0z" fill="${color}"/>
+    <circle cx="14" cy="14" r="6" fill="white"/>
+  </svg>`;
+  return L.divIcon({
+    html: svg, className: '', iconSize: [28, 36], iconAnchor: [14, 36], popupAnchor: [0, -36]
+  });
+}
+
+function renderMarkers() {
+  if (!leafletMap) return;
+  Object.values(markers).forEach(m => leafletMap.removeLayer(m));
+  markers = {};
+  const data = allData[currentTab];
+  data.forEach(rec => {
+    if (!rec.lat || !rec.lng) return;
+    const m = L.marker([rec.lat, rec.lng], { icon: makeIcon(rec.status) }).addTo(leafletMap);
+    const popupHtml = `<div class="map-popup">
+      <div class="map-popup-name">${rec.name}</div>
+      <div class="map-popup-info">📞 ${rec.phone || '-'}</div>
+      <div class="map-popup-info">🏪 ${rec.business_type || rec.customer_type || '-'}</div>
+      <div class="map-popup-info">📍 ${rec.location_name || ''}</div>
+      <div class="map-popup-actions">
+        <button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>
+        <button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️ ລຶບ</button>
+      </div>
+    </div>`;
+    m.bindPopup(popupHtml, { maxWidth: 260 });
+    markers[rec.id] = m;
+  });
+}
+
+// ===== DATA =====
+async function loadAll() {
+  const [{ data: p }, { data: c }] = await Promise.all([
+    sb.from('partners').select('*').order('created_at', { ascending: false }),
+    sb.from('customers').select('*').order('created_at', { ascending: false })
+  ]);
+  allData.partner = p || [];
+  allData.customer = c || [];
+  renderMarkers();
+  renderList();
+  renderDash();
+}
+
+async function saveRecord() {
+  const id = document.getElementById('edit-id').value;
+  const name = document.getElementById('f-name').value.trim();
+  const phone = document.getElementById('f-phone').value.trim();
+  const notes = document.getElementById('f-notes').value.trim();
+  const status = document.querySelector('.status-opt.selected')?.dataset.val;
+
+  if (!name) { alert('ກະລຸນາໃສ່ຊື່'); return; }
+
+  let photoUrl = null;
+  if (editPhotoFile) photoUrl = await uploadPhoto(editPhotoFile);
+
+  const table = currentTab === 'partner' ? 'partners' : 'customers';
+  const { data: { user } } = await sb.auth.getUser();
+
+  const payload = {
+    name, phone, notes, status,
+    lat: editLat, lng: editLng, location_name: document.getElementById('loc-status').textContent,
+    created_by: user.id
+  };
+  if (currentTab === 'partner') payload.business_type = document.getElementById('f-business').value.trim();
+  else { payload.customer_type = document.getElementById('f-business').value.trim(); payload.budget = document.getElementById('f-budget').value.trim(); }
+  if (photoUrl) payload.photo_url = photoUrl;
+
+  if (id) {
+    await sb.from(table).update(payload).eq('id', id);
+  } else {
+    await sb.from(table).insert(payload);
+  }
+
+  closeModal();
+  await loadAll();
+}
+
+async function deleteRecord(id) {
+  if (!confirm('ທ່ານຕ້ອງການລຶບລາຍການນີ້ບໍ?')) return;
+  const table = currentTab === 'partner' ? 'partners' : 'customers';
+  await sb.from(table).delete().eq('id', id);
+  document.querySelectorAll('.leaflet-popup-close-button').forEach(b => b.click());
+  await loadAll();
+}
+
+async function uploadPhoto(file) {
+  const ext = file.name.split('.').pop();
+  const path = `${Date.now()}.${ext}`;
+  const { error } = await sb.storage.from('survey-photos').upload(path, file);
+  if (error) return null;
+  const { data } = sb.storage.from('survey-photos').getPublicUrl(path);
+  return data.publicUrl;
+}
+
+// ===== LIST VIEW =====
+function renderList() {
+  const container = document.getElementById('list-items');
+  document.getElementById('list-loading').style.display = 'none';
+  const data = allData[currentTab];
+  if (!data.length) { container.innerHTML = '<div class="loading">ຍັງບໍ່ມີຂໍ້ມູນ<br>ກົດ + ເພື່ອເພີ່ມ</div>'; return; }
+  container.innerHTML = data.map(rec => {
+    const typeFld = currentTab === 'partner' ? rec.business_type : rec.customer_type;
+    const extra = currentTab === 'customer' && rec.budget ? `💰 ${rec.budget}` : '';
+    return `<div class="record-card">
+      <div class="record-card-header">
+        <div>
+          <div class="record-name">${rec.name}</div>
+          <div class="record-info">📞 ${rec.phone || '-'}</div>
+          ${typeFld ? `<div class="record-info">🏪 ${typeFld}</div>` : ''}
+          ${extra ? `<div class="record-info">${extra}</div>` : ''}
+          ${rec.location_name ? `<div class="record-info">📍 ${rec.location_name}</div>` : ''}
+        </div>
+        <span class="status-badge status-${rec.status}">${STATUS_LABELS[rec.status]||rec.status}</span>
+      </div>
+      ${rec.notes ? `<div class="record-info" style="margin-top:4px; font-style:italic;">💬 ${rec.notes}</div>` : ''}
+      <div class="record-actions">
+        <button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>
+        ${rec.lat ? `<button class="btn-sm" onclick="flyTo(${rec.lat},${rec.lng})">🗺️ ເບິ່ງແຜນທີ່</button>` : ''}
+        <button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function flyTo(lat, lng) {
+  switchView('map');
+  setTimeout(() => { leafletMap.setView([lat, lng], 17); }, 100);
+}
+
+// ===== DASHBOARD =====
+function renderDash() {
+  const today = new Date().toDateString();
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const tp = allData.partner.filter(r => new Date(r.created_at).toDateString() === today).length;
+  const tc = allData.customer.filter(r => new Date(r.created_at).toDateString() === today).length;
+  const mp = allData.partner.filter(r => r.created_at?.startsWith(thisMonth)).length;
+  const mc = allData.customer.filter(r => r.created_at?.startsWith(thisMonth)).length;
+  document.getElementById('dash-today-p').textContent = tp;
+  document.getElementById('dash-today-c').textContent = tc;
+  document.getElementById('dash-month-p').textContent = mp;
+  document.getElementById('dash-month-c').textContent = mc;
+
+  const renderStatus = (data, statuses, containerId) => {
+    const counts = {};
+    statuses.forEach(s => counts[s.val] = 0);
+    data.forEach(r => { if (counts[r.status] !== undefined) counts[r.status]++; });
+    document.getElementById(containerId).innerHTML = statuses.map(s => {
+      const dot = s.val === 'not_interested' ? 'dot-red' : s.val === 'considering' ? 'dot-amber' : 'dot-green';
+      return `<div class="status-row"><span><span class="status-dot ${dot}"></span>${s.label.split(' ')[1]}</span><strong>${counts[s.val]}</strong></div>`;
+    }).join('');
+  };
+  renderStatus(allData.partner, STATUS_CONFIG.partner, 'dash-partner-status');
+  renderStatus(allData.customer, STATUS_CONFIG.customer, 'dash-customer-status');
+
+  const recent = [...allData.partner.map(r => ({...r, _type:'Partner'})), ...allData.customer.map(r => ({...r, _type:'ລູກຄ້າ'}))]
+    .sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
+  document.getElementById('dash-recent').innerHTML = recent.map(r =>
+    `<div class="status-row"><span>${r._type}: ${r.name}</span><span class="status-badge status-${r.status}">${STATUS_LABELS[r.status]}</span></div>`
+  ).join('') || '<div style="color:var(--text3);font-size:0.85rem;padding:8px 0">ຍັງບໍ່ມີຂໍ້ມູນ</div>';
+}
+
+// ===== TABS & VIEWS =====
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-partner').classList.toggle('active', tab === 'partner');
+  document.getElementById('tab-customer').classList.toggle('active', tab === 'customer');
+  renderMarkers();
+  renderList();
+}
+function switchView(view) {
+  currentView = view;
+  document.getElementById('vbtn-map').classList.toggle('active', view === 'map');
+  document.getElementById('vbtn-list').classList.toggle('active', view === 'list');
+  document.getElementById('map-view').style.display = view === 'map' ? 'flex' : 'none';
+  document.getElementById('list-view').style.display = view === 'list' ? 'flex' : 'none';
+  document.getElementById('dash-view').style.display = 'none';
+  if (view === 'map') setTimeout(() => leafletMap.invalidateSize(), 100);
+}
+function showDash() {
+  document.getElementById('map-view').style.display = 'none';
+  document.getElementById('list-view').style.display = 'none';
+  document.getElementById('dash-view').style.display = 'flex';
+  renderDash();
+}
+
+// ===== MODAL =====
+let selectedStatus = null;
+function openAddModal() {
+  document.getElementById('edit-id').value = '';
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-phone').value = '';
+  document.getElementById('f-business').value = '';
+  document.getElementById('f-budget').value = '';
+  document.getElementById('f-notes').value = '';
+  document.getElementById('loc-status').textContent = 'ຍັງບໍ່ໄດ້ເລືອກ location';
+  document.getElementById('photo-preview').classList.add('hidden');
+  editLat = editLng = editPhotoFile = null;
+  selectedStatus = currentTab === 'partner' ? 'considering' : 'considering';
+  renderStatusSelector();
+  renderModalFields();
+  document.getElementById('modal-title').textContent = currentTab === 'partner' ? 'ເພີ່ມ Partner ໃໝ່' : 'ເພີ່ມ ລູກຄ້າ ໃໝ່';
+  document.getElementById('modal').classList.add('open');
+}
+function openEditModal(id) {
+  const rec = allData[currentTab].find(r => r.id === id);
+  if (!rec) return;
+  document.getElementById('edit-id').value = id;
+  document.getElementById('f-name').value = rec.name || '';
+  document.getElementById('f-phone').value = rec.phone || '';
+  document.getElementById('f-business').value = rec.business_type || rec.customer_type || '';
+  document.getElementById('f-budget').value = rec.budget || '';
+  document.getElementById('f-notes').value = rec.notes || '';
+  editLat = rec.lat; editLng = rec.lng;
+  document.getElementById('loc-status').textContent = rec.location_name || (rec.lat ? `${rec.lat.toFixed(5)}, ${rec.lng.toFixed(5)}` : 'ຍັງບໍ່ມີ');
+  selectedStatus = rec.status;
+  editPhotoFile = null;
+  if (rec.photo_url) {
+    const prev = document.getElementById('photo-preview');
+    prev.src = rec.photo_url; prev.classList.remove('hidden');
+  } else document.getElementById('photo-preview').classList.add('hidden');
+  renderStatusSelector();
+  renderModalFields();
+  document.getElementById('modal-title').textContent = currentTab === 'partner' ? 'ແກ້ໄຂ Partner' : 'ແກ້ໄຂ ລູກຄ້າ';
+  document.getElementById('modal').classList.add('open');
+}
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+function renderStatusSelector() {
+  const opts = STATUS_CONFIG[currentTab];
+  document.getElementById('status-selector').innerHTML = opts.map(o =>
+    `<div class="status-opt ${o.val === selectedStatus ? 'selected' : ''}" data-val="${o.val}" onclick="selectStatus('${o.val}')">${o.label}</div>`
+  ).join('');
+}
+function selectStatus(val) {
+  selectedStatus = val;
+  document.querySelectorAll('.status-opt').forEach(el => el.classList.toggle('selected', el.dataset.val === val));
+}
+function renderModalFields() {
+  const isCustomer = currentTab === 'customer';
+  document.getElementById('fg-budget').classList.toggle('hidden', !isCustomer);
+  document.getElementById('business-label').textContent = isCustomer ? 'ປະເພດລູກຄ້າ / ທຸລະກິດ' : 'ປະເພດທຸລະກິດ / ສິນຄ້າທີ່ຂາຍ';
+}
+
+// ===== LOCATION =====
+function useCurrentLocation() {
+  document.getElementById('loc-status').textContent = 'ກຳລັງດຶງ GPS...';
+  navigator.geolocation.getCurrentPosition(pos => {
+    setModalLocation(pos.coords.latitude, pos.coords.longitude, 'GPS ປັດຈຸບັນ');
+  }, () => {
+    document.getElementById('loc-status').textContent = 'ບໍ່ສາມາດດຶງ GPS ໄດ້';
+  }, { enableHighAccuracy: true });
+}
+function pickOnMap() {
+  closeModal();
+  pickingLocation = true;
+  leafletMap.getContainer().style.cursor = 'crosshair';
+  switchView('map');
+  alert('ກົດໃສ່ແຜນທີ່ ເພື່ອເລືອກ location');
+}
+function setModalLocation(lat, lng, name) {
+  editLat = lat; editLng = lng;
+  document.getElementById('loc-status').textContent = `📍 ${name} (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+}
+
+// ===== PHOTO =====
+function handlePhoto(input) {
+  if (!input.files[0]) return;
+  editPhotoFile = input.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    const prev = document.getElementById('photo-preview');
+    prev.src = e.target.result; prev.classList.remove('hidden');
+  };
+  reader.readAsDataURL(editPhotoFile);
+}
+
+// Close modal on overlay click
+document.getElementById('modal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+</script>
+</body>
+</html>
