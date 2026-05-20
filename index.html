@@ -139,7 +139,6 @@
   .toast.error { background: var(--red); color: #fff; }
   .toast.info { background: var(--text); color: #fff; }
 
-  /* SAVE LOADING */
   .btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>
 </head>
@@ -291,10 +290,9 @@
 </div>
 
 <script>
-// ===== CONFIG — ໃສ່ຄ່າ Supabase ຂອງທ່ານ =====
+// ===== CONFIG =====
 const SUPABASE_URL = 'https://xtzlhrgxbeqiwsighhcp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0emxocmd4YmVxaXdzaWdoaGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNTMzOTksImV4cCI6MjA5MjkyOTM5OX0.NuP-bJrGbCHKUlpm3o_2aRCGxBPjgiYzdZfGkqYGySA';
-// ================================================
 
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -307,6 +305,7 @@ let allData = { partner: [], customer: [] };
 let editLat = null, editLng = null;
 let editPhotoFile = null;
 let pickingLocation = false;
+let appReady = false;
 
 // ===== STATUS CONFIG =====
 const STATUS_CONFIG = {
@@ -339,25 +338,46 @@ function showToast(msg, type = 'success', duration = 3000) {
 }
 
 // ===== AUTH =====
-sb.auth.onAuthStateChange((event, session) => {
-  if (session) { showApp(); loadAll(); }
-  else { showAuth(); }
+sb.auth.onAuthStateChange(async (event, session) => {
+  console.log('[Auth] event:', event, 'session:', !!session);
+  if (session) {
+    showApp();
+    // ລໍຖ້າ map init ກ່ອນ loadAll
+    await waitForMap();
+    await loadAll();
+  } else {
+    showAuth();
+  }
 });
+
+function waitForMap() {
+  return new Promise(resolve => {
+    if (leafletMap) { resolve(); return; }
+    const check = setInterval(() => {
+      if (leafletMap) { clearInterval(check); resolve(); }
+    }, 100);
+    // timeout 3s
+    setTimeout(() => { clearInterval(check); resolve(); }, 3000);
+  });
+}
 
 function showAuth() {
   document.getElementById('auth-screen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
 }
+
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   if (!leafletMap) initMap();
 }
+
 function toggleAuth() {
   const isLogin = document.getElementById('auth-form-login').style.display !== 'none';
   document.getElementById('auth-form-login').style.display = isLogin ? 'none' : 'block';
   document.getElementById('auth-form-register').style.display = isLogin ? 'block' : 'none';
 }
+
 async function doLogin() {
   const email = document.getElementById('auth-email').value;
   const pass = document.getElementById('auth-pass').value;
@@ -366,6 +386,7 @@ async function doLogin() {
   const { error } = await sb.auth.signInWithPassword({ email, password: pass });
   msg.textContent = error ? 'Email ຫຼື Password ບໍ່ຖືກຕ້ອງ' : '';
 }
+
 async function doRegister() {
   const email = document.getElementById('reg-email').value;
   const pass = document.getElementById('reg-pass').value;
@@ -374,6 +395,7 @@ async function doRegister() {
   const { error } = await sb.auth.signUp({ email, password: pass });
   msg.textContent = error ? error.message : 'ລົງທະບຽນສຳເລັດ! ກວດ Email ທ່ານ';
 }
+
 async function doLogout() {
   await sb.auth.signOut();
 }
@@ -408,6 +430,8 @@ function initMap() {
       document.getElementById('modal').classList.add('open');
     }
   });
+
+  console.log('[Map] initialized');
 }
 
 let locateMarker = null;
@@ -439,10 +463,14 @@ function makeIcon(status) {
 }
 
 function renderMarkers() {
-  if (!leafletMap) return;
+  if (!leafletMap) {
+    console.warn('[renderMarkers] map not ready');
+    return;
+  }
   Object.values(markers).forEach(m => leafletMap.removeLayer(m));
   markers = {};
   const data = allData[currentTab];
+  console.log('[renderMarkers] rendering', data.length, 'records for tab:', currentTab);
   data.forEach(rec => {
     if (!rec.lat || !rec.lng) return;
     const m = L.marker([rec.lat, rec.lng], { icon: makeIcon(rec.status) }).addTo(leafletMap);
@@ -463,15 +491,28 @@ function renderMarkers() {
 
 // ===== DATA =====
 async function loadAll() {
-  const [{ data: p }, { data: c }] = await Promise.all([
-    sb.from('partners').select('*').order('created_at', { ascending: false }),
-    sb.from('customers').select('*').order('created_at', { ascending: false })
-  ]);
-  allData.partner = p || [];
-  allData.customer = c || [];
-  renderMarkers();
-  renderList();
-  renderDash();
+  console.log('[loadAll] starting...');
+  try {
+    const [{ data: p, error: pe }, { data: c, error: ce }] = await Promise.all([
+      sb.from('partners').select('*').order('created_at', { ascending: false }),
+      sb.from('customers').select('*').order('created_at', { ascending: false })
+    ]);
+
+    if (pe) console.error('[loadAll] partners error:', pe);
+    if (ce) console.error('[loadAll] customers error:', ce);
+
+    allData.partner = p || [];
+    allData.customer = c || [];
+
+    console.log('[loadAll] partners:', allData.partner.length, 'customers:', allData.customer.length);
+
+    renderMarkers();
+    renderList();
+    renderDash();
+  } catch (err) {
+    console.error('[loadAll] exception:', err);
+    showToast('❌ ໂຫຼດຂໍ້ມູນຜິດພາດ', 'error');
+  }
 }
 
 async function saveRecord() {
@@ -513,7 +554,6 @@ async function saveRecord() {
     if (photoUrl) {
       payload.photo_url = photoUrl;
     } else if (id) {
-      // ຮັກສາຮູບເກົ່າ — ບໍ່ overwrite
       const existing = allData[currentTab].find(r => r.id === id);
       if (existing?.photo_url) payload.photo_url = existing.photo_url;
     }
@@ -663,7 +703,7 @@ function openAddModal() {
   document.getElementById('loc-status').textContent = 'ຍັງບໍ່ໄດ້ເລືອກ location';
   document.getElementById('photo-preview').classList.add('hidden');
   editLat = editLng = editPhotoFile = null;
-  selectedStatus = currentTab === 'partner' ? 'considering' : 'considering';
+  selectedStatus = 'considering';
   renderStatusSelector();
   renderModalFields();
   document.getElementById('modal-title').textContent = currentTab === 'partner' ? 'ເພີ່ມ Partner ໃໝ່' : 'ເພີ່ມ ລູກຄ້າ ໃໝ່';
@@ -751,7 +791,6 @@ document.getElementById('modal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });
 
-// ປ້ອງກັນ scroll ຄ້າງ
 document.getElementById('modal').addEventListener('touchmove', function(e) {
   if (e.target === this) e.preventDefault();
 }, { passive: false });
