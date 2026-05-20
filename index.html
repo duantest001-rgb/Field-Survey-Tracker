@@ -5,8 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Field Survey Tracker</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 <style>
   :root {
     --green: #1D9E75; --green-light: #E1F5EE; --green-dark: #085041;
@@ -41,8 +46,9 @@
   /* TOP BAR */
   .topbar { background: var(--bg); border-bottom: 1px solid var(--border); padding: 0.6rem 1rem; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 1000; }
   .topbar-title { font-size: 1rem; font-weight: 700; color: var(--text); }
-  .topbar-right { display: flex; align-items: center; gap: 8px; }
-  .icon-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 0.8rem; color: var(--text2); cursor: pointer; }
+  .topbar-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .icon-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 0.8rem; color: var(--text2); cursor: pointer; white-space: nowrap; }
+  .icon-btn.admin { border-color: var(--amber); color: var(--amber); }
 
   /* TABS */
   .tabs { display: flex; background: var(--bg); border-bottom: 1px solid var(--border); }
@@ -53,6 +59,13 @@
   .view-toggle { display: flex; gap: 6px; padding: 0.6rem 1rem; background: var(--bg); border-bottom: 1px solid var(--border); }
   .view-btn { flex: 1; padding: 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg2); font-size: 0.8rem; color: var(--text2); cursor: pointer; text-align: center; }
   .view-btn.active { background: var(--green); color: #fff; border-color: var(--green); }
+
+  /* SEARCH BAR */
+  .search-bar { padding: 0.5rem 1rem; background: var(--bg); border-bottom: 1px solid var(--border); display: none; gap: 6px; }
+  .search-bar.show { display: flex; }
+  .search-input { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.9rem; font-family: inherit; }
+  .search-input:focus { outline: none; border-color: var(--green); }
+  .filter-select { padding: 0.5rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 0.8rem; font-family: inherit; background: var(--bg); color: var(--text); }
 
   /* MAP */
   #map { width: 100%; flex: 1; }
@@ -68,10 +81,11 @@
   .status-considering { background: var(--amber-light); color: var(--amber); }
   .status-not_interested { background: var(--red-light); color: var(--red); }
   .record-info { font-size: 0.82rem; color: var(--text2); margin-top: 3px; }
-  .record-actions { display: flex; gap: 6px; margin-top: 0.75rem; }
+  .record-actions { display: flex; gap: 6px; margin-top: 0.75rem; flex-wrap: wrap; }
   .btn-sm { padding: 5px 12px; border-radius: var(--radius-sm); font-size: 0.78rem; border: 1px solid var(--border); background: var(--bg2); color: var(--text2); cursor: pointer; font-family: inherit; }
   .btn-sm.danger { color: var(--red); border-color: #F0959580; }
   .btn-sm.primary { color: var(--green); border-color: var(--green); background: var(--green-light); }
+  .highlight { background: #fff3cd; border-radius: 3px; }
 
   /* DASHBOARD */
   .dash-view { display: none; flex: 1; overflow-y: auto; padding: 0.75rem; flex-direction: column; gap: 0.6rem; }
@@ -87,6 +101,14 @@
   .dot-green { background: var(--green); }
   .dot-amber { background: var(--amber); }
   .dot-red { background: var(--red); }
+  .chart-wrap { position: relative; height: 200px; margin-top: 0.5rem; }
+
+  /* ADMIN PANEL */
+  .admin-view { display: none; flex: 1; overflow-y: auto; padding: 0.75rem; flex-direction: column; gap: 0.6rem; }
+  .admin-card { background: var(--bg); border-radius: var(--radius); border: 1px solid var(--border); padding: 1rem; }
+  .admin-card-title { font-weight: 700; margin-bottom: 0.75rem; font-size: 0.95rem; }
+  .admin-user-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  .admin-user-row:last-child { border-bottom: none; }
 
   /* MODAL */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 2000; display: none; align-items: flex-end; justify-content: center; }
@@ -101,8 +123,7 @@
   textarea.field-input { resize: vertical; min-height: 70px; }
   .status-selector { display: flex; gap: 6px; }
   .status-opt { flex: 1; padding: 0.6rem; border: 1.5px solid var(--border); border-radius: var(--radius-sm); text-align: center; font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-  .status-opt[data-val="joined"], .status-opt[data-val="interested"] { color: var(--green-dark); }
-  .status-opt[data-val="joined"].selected, .status-opt[data-val="interested"].selected { background: var(--green-light); border-color: var(--green); }
+  .status-opt[data-val="joined"].selected, .status-opt[data-val="interested"].selected { background: var(--green-light); border-color: var(--green); color: var(--green-dark); }
   .status-opt[data-val="considering"].selected { background: var(--amber-light); border-color: var(--amber); color: var(--amber); }
   .status-opt[data-val="not_interested"].selected { background: var(--red-light); border-color: var(--red); color: var(--red); }
   .location-pick { display: flex; gap: 6px; }
@@ -118,6 +139,10 @@
   .fab { position: fixed; bottom: 1.5rem; right: 1.25rem; width: 56px; height: 56px; background: var(--green); border-radius: 50%; border: none; color: #fff; font-size: 1.6rem; cursor: pointer; z-index: 900; box-shadow: 0 4px 16px rgba(29,158,117,0.4); display: flex; align-items: center; justify-content: center; }
   .fab:active { transform: scale(0.95); }
 
+  /* OFFLINE BADGE */
+  .offline-badge { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); background: var(--amber); color: #fff; padding: 4px 16px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; z-index: 1100; display: none; }
+  .offline-badge.show { display: block; }
+
   /* MAP MARKER POPUP */
   .leaflet-popup-content { margin: 0 !important; }
   .map-popup { padding: 0.75rem; min-width: 200px; }
@@ -129,7 +154,6 @@
   .loading { text-align: center; padding: 2rem; color: var(--text3); font-size: 0.9rem; }
   .spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin 0.7s linear infinite; margin-bottom: 8px; }
   @keyframes spin { to { transform: rotate(360deg); } }
-
   .hidden { display: none !important; }
 
   /* TOAST */
@@ -138,13 +162,15 @@
   .toast.success { background: var(--green); color: #fff; }
   .toast.error { background: var(--red); color: #fff; }
   .toast.info { background: var(--text); color: #fff; }
-
   .btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  /* REALTIME DOT */
+  .rt-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); display: inline-block; margin-left: 4px; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
 </style>
 </head>
 <body>
 
-<!-- AUTH SCREEN -->
 <div id="auth-screen">
   <div class="auth-logo">📍</div>
   <div class="auth-title">Field Survey Tracker</div>
@@ -167,11 +193,14 @@
   </div>
 </div>
 
-<!-- MAIN APP -->
 <div id="app">
+  <div class="offline-badge" id="offline-badge">📵 Offline Mode</div>
+
   <div class="topbar">
-    <div class="topbar-title">📍 Survey Tracker</div>
+    <div class="topbar-title">📍 Survey Tracker <span class="rt-dot" id="rt-dot" style="display:none"></span></div>
     <div class="topbar-right">
+      <button class="icon-btn" id="admin-btn" onclick="showAdmin()" style="display:none">👑 Admin</button>
+      <button class="icon-btn" onclick="exportExcel()">📤 Excel</button>
       <button class="icon-btn" onclick="showDash()">📊 ສະຫຼຸບ</button>
       <button class="icon-btn" onclick="doLogout()">ອອກ</button>
     </div>
@@ -187,35 +216,49 @@
     <button class="view-btn" id="vbtn-list" onclick="switchView('list')">📋 ລາຍການ</button>
   </div>
 
-  <!-- MAP VIEW -->
+  <div class="search-bar" id="search-bar">
+    <input type="text" class="search-input" id="search-input" placeholder="🔍 ຊອກຫາຊື່, ເບີໂທ..." oninput="renderList()"/>
+    <select class="filter-select" id="filter-status" onchange="renderList()">
+      <option value="">ທຸກສະຖານະ</option>
+      <option value="joined">ເຂົ້າຮ່ວມ</option>
+      <option value="interested">ສົນໃຈ</option>
+      <option value="considering">ພິຈາລະນາ</option>
+      <option value="not_interested">ບໍ່ສົນໃຈ</option>
+    </select>
+  </div>
+
   <div class="map-view" id="map-view">
     <div id="map"></div>
   </div>
 
-  <!-- LIST VIEW -->
   <div class="list-view" id="list-view">
     <div class="loading" id="list-loading"><div class="spinner"></div><br>ກຳລັງໂຫຼດ...</div>
     <div id="list-items"></div>
   </div>
 
-  <!-- DASHBOARD -->
   <div class="dash-view" id="dash-view">
     <div class="dash-section">
       <div class="dash-section-title">ສະຫຼຸບລວມ</div>
       <div class="stats-grid">
+        <div class="stat-card"><div class="stat-num" id="dash-total-p">0</div><div class="stat-label">Partner ທັງໝົດ</div></div>
+        <div class="stat-card"><div class="stat-num" id="dash-total-c">0</div><div class="stat-label">ລູກຄ້າ ທັງໝົດ</div></div>
         <div class="stat-card"><div class="stat-num" id="dash-today-p">0</div><div class="stat-label">Partner ມື້ນີ້</div></div>
         <div class="stat-card"><div class="stat-num" id="dash-today-c">0</div><div class="stat-label">ລູກຄ້າ ມື້ນີ້</div></div>
-        <div class="stat-card"><div class="stat-num" id="dash-month-p">0</div><div class="stat-label">Partner ເດືອນນີ້</div></div>
-        <div class="stat-card"><div class="stat-num" id="dash-month-c">0</div><div class="stat-label">ລູກຄ້າ ເດືອນນີ້</div></div>
       </div>
     </div>
     <div class="dash-section">
       <div class="dash-section-title">Partner ຕາມສະຖານະ</div>
       <div id="dash-partner-status"></div>
+      <div class="chart-wrap"><canvas id="chart-partner"></canvas></div>
     </div>
     <div class="dash-section">
       <div class="dash-section-title">ລູກຄ້າ ຕາມສະຖານະ</div>
       <div id="dash-customer-status"></div>
+      <div class="chart-wrap"><canvas id="chart-customer"></canvas></div>
+    </div>
+    <div class="dash-section">
+      <div class="dash-section-title">ລາຍການ 7 ມື້ຫຼ້າສຸດ</div>
+      <div class="chart-wrap"><canvas id="chart-trend"></canvas></div>
     </div>
     <div class="dash-section">
       <div class="dash-section-title">ລາຍການລ່າສຸດ</div>
@@ -223,20 +266,31 @@
     </div>
   </div>
 
-  <button class="fab" onclick="openAddModal()">+</button>
+  <div class="admin-view" id="admin-view">
+    <div class="admin-card">
+      <div class="admin-card-title">👑 ຈັດການ Admin</div>
+      <div id="admin-users-list"><div class="loading">ກຳລັງໂຫຼດ...</div></div>
+      <div style="margin-top:1rem;">
+        <input type="email" class="field-input" id="new-admin-email" placeholder="Email ທີ່ຈະເພີ່ມເປັນ Admin"/>
+        <button class="btn-primary" style="margin-top:8px" onclick="addAdmin()">+ ເພີ່ມ Admin</button>
+      </div>
+    </div>
+    <div class="admin-card">
+      <div class="admin-card-title">📊 ສະຫຼຸບທີມ</div>
+      <div id="admin-team-stats"></div>
+    </div>
+  </div>
+
+  <button class="fab" id="fab-btn" onclick="openAddModal()">+</button>
 </div>
 
-<!-- TOAST -->
 <div class="toast" id="toast"></div>
 
-<!-- ADD/EDIT MODAL -->
 <div class="modal-overlay" id="modal">
   <div class="modal">
     <div class="modal-handle"></div>
     <div class="modal-title" id="modal-title">ເພີ່ມ Partner</div>
-
     <input type="hidden" id="edit-id"/>
-
     <div class="field-group">
       <div class="field-label">ຊື່ / ຊື່ບໍລິສັດ *</div>
       <input type="text" class="field-input" id="f-name" placeholder="ກະລຸນາໃສ່ຊື່"/>
@@ -246,33 +300,29 @@
       <input type="tel" class="field-input" id="f-phone" placeholder="020 xx xxx xxx"/>
     </div>
     <div class="field-group" id="fg-business">
-      <div class="field-label" id="business-label">ປະເພດທຸລະກິດ / ສິນຄ້າທີ່ຂາຍ</div>
+      <div class="field-label" id="business-label">ປະເພດທຸລະກິດ</div>
       <input type="text" class="field-input" id="f-business" placeholder="ເຊັ່ນ: ຮ້ານຂາຍຢາ, ຮ້ານອາຫານ..."/>
     </div>
     <div class="field-group hidden" id="fg-budget">
-      <div class="field-label">ງົບປະມານ (Budget)</div>
+      <div class="field-label">ງົບປະມານ</div>
       <input type="text" class="field-input" id="f-budget" placeholder="ເຊັ່ນ: 5-10 ລ້ານ ກີບ"/>
     </div>
-
     <div class="field-group">
       <div class="field-label">ສະຖານະ</div>
       <div class="status-selector" id="status-selector"></div>
     </div>
-
     <div class="field-group">
       <div class="field-label">ໝາຍເຫດ</div>
       <textarea class="field-input" id="f-notes" placeholder="ບັນທຶກເພີ່ມເຕີມ..."></textarea>
     </div>
-
     <div class="field-group">
       <div class="field-label">📍 Location</div>
       <div class="location-pick">
-        <button class="btn-loc" onclick="useCurrentLocation()">📡 ໃຊ້ GPS ປັດຈຸບັນ</button>
+        <button class="btn-loc" onclick="useCurrentLocation()">📡 GPS ປັດຈຸບັນ</button>
         <button class="btn-loc" onclick="pickOnMap()">🗺️ ເລືອກໃນແຜນທີ່</button>
       </div>
       <div class="loc-status" id="loc-status">ຍັງບໍ່ໄດ້ເລືອກ location</div>
     </div>
-
     <div class="field-group">
       <div class="field-label">ຮູບຖ່າຍ</div>
       <input type="file" id="f-photo" accept="image/*" capture="environment" style="display:none" onchange="handlePhoto(this)"/>
@@ -281,7 +331,6 @@
         <img id="photo-preview" class="photo-preview hidden" src="" alt="preview"/>
       </div>
     </div>
-
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">ຍົກເລີກ</button>
       <button class="btn-save" onclick="saveRecord()">💾 ບັນທຶກ</button>
@@ -290,9 +339,9 @@
 </div>
 
 <script>
-// ===== CONFIG =====
 const SUPABASE_URL = 'https://xtzlhrgxbeqiwsighhcp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0emxocmd4YmVxaXdzaWdoaGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNTMzOTksImV4cCI6MjA5MjkyOTM5OX0.NuP-bJrGbCHKUlpm3o_2aRCGxBPjgiYzdZfGkqYGySA';
+const ADMIN_EMAIL = 'duan.test001@gmail.com';
 
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -300,14 +349,17 @@ const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentTab = 'partner';
 let currentView = 'map';
 let leafletMap = null;
+let clusterGroup = null;
 let markers = {};
 let allData = { partner: [], customer: [] };
 let editLat = null, editLng = null;
 let editPhotoFile = null;
 let pickingLocation = false;
-let appReady = false;
+let currentUser = null;
+let isAdmin = false;
+let realtimeChannel = null;
+let chartPartner = null, chartCustomer = null, chartTrend = null;
 
-// ===== STATUS CONFIG =====
 const STATUS_CONFIG = {
   partner: [
     { val: 'joined', label: '🟢 ເຂົ້າຮ່ວມ' },
@@ -320,32 +372,41 @@ const STATUS_CONFIG = {
     { val: 'not_interested', label: '🔴 ບໍ່ສົນໃຈ' }
   ]
 };
-const STATUS_LABELS = {
-  joined: 'ເຂົ້າຮ່ວມ', interested: 'ສົນໃຈ',
-  considering: 'ພິຈາລະນາ', not_interested: 'ບໍ່ສົນໃຈ'
-};
-const MARKER_COLORS = {
-  joined: '#1D9E75', interested: '#1D9E75',
-  considering: '#BA7517', not_interested: '#E24B4A'
-};
+const STATUS_LABELS = { joined:'ເຂົ້າຮ່ວມ', interested:'ສົນໃຈ', considering:'ພິຈາລະນາ', not_interested:'ບໍ່ສົນໃຈ' };
+const MARKER_COLORS = { joined:'#1D9E75', interested:'#1D9E75', considering:'#BA7517', not_interested:'#E24B4A' };
+
+// ===== OFFLINE =====
+window.addEventListener('online', () => { document.getElementById('offline-badge').classList.remove('show'); loadAll(); });
+window.addEventListener('offline', () => { document.getElementById('offline-badge').classList.add('show'); loadFromCache(); });
+
+function saveToCache(key, data) { try { localStorage.setItem('cache_'+key, JSON.stringify(data)); } catch(e){} }
+function loadFromCache() {
+  const p = JSON.parse(localStorage.getItem('cache_partner') || '[]');
+  const c = JSON.parse(localStorage.getItem('cache_customer') || '[]');
+  allData.partner = p; allData.customer = c;
+  renderMarkers(); renderList(); renderDash();
+  if (p.length || c.length) showToast('📵 ໃຊ້ຂໍ້ມູນ offline', 'info');
+}
 
 // ===== TOAST =====
-function showToast(msg, type = 'success', duration = 3000) {
+function showToast(msg, type='success', duration=3000) {
   const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.className = `toast ${type} show`;
+  t.textContent = msg; t.className = `toast ${type} show`;
   setTimeout(() => { t.className = 'toast'; }, duration);
 }
 
 // ===== AUTH =====
 sb.auth.onAuthStateChange(async (event, session) => {
-  console.log('[Auth] event:', event, 'session:', !!session);
   if (session) {
+    currentUser = session.user;
     showApp();
-    // ລໍຖ້າ map init ກ່ອນ loadAll
     await waitForMap();
+    await checkAdmin();
     await loadAll();
+    setupRealtime();
   } else {
+    currentUser = null; isAdmin = false;
+    teardownRealtime();
     showAuth();
   }
 });
@@ -353,31 +414,37 @@ sb.auth.onAuthStateChange(async (event, session) => {
 function waitForMap() {
   return new Promise(resolve => {
     if (leafletMap) { resolve(); return; }
-    const check = setInterval(() => {
-      if (leafletMap) { clearInterval(check); resolve(); }
-    }, 100);
-    // timeout 3s
+    const check = setInterval(() => { if (leafletMap) { clearInterval(check); resolve(); } }, 100);
     setTimeout(() => { clearInterval(check); resolve(); }, 3000);
   });
+}
+
+async function checkAdmin() {
+  // ກວດ email ຫຼື admins table
+  if (currentUser?.email === ADMIN_EMAIL) { isAdmin = true; }
+  else {
+    try {
+      const { data } = await sb.from('admins').select('id').eq('user_id', currentUser.id).maybeSingle();
+      isAdmin = !!data;
+    } catch(e) { isAdmin = false; }
+  }
+  document.getElementById('admin-btn').style.display = isAdmin ? 'block' : 'none';
 }
 
 function showAuth() {
   document.getElementById('auth-screen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
 }
-
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   if (!leafletMap) initMap();
 }
-
 function toggleAuth() {
   const isLogin = document.getElementById('auth-form-login').style.display !== 'none';
   document.getElementById('auth-form-login').style.display = isLogin ? 'none' : 'block';
   document.getElementById('auth-form-register').style.display = isLogin ? 'block' : 'none';
 }
-
 async function doLogin() {
   const email = document.getElementById('auth-email').value;
   const pass = document.getElementById('auth-pass').value;
@@ -386,7 +453,6 @@ async function doLogin() {
   const { error } = await sb.auth.signInWithPassword({ email, password: pass });
   msg.textContent = error ? 'Email ຫຼື Password ບໍ່ຖືກຕ້ອງ' : '';
 }
-
 async function doRegister() {
   const email = document.getElementById('reg-email').value;
   const pass = document.getElementById('reg-pass').value;
@@ -395,26 +461,39 @@ async function doRegister() {
   const { error } = await sb.auth.signUp({ email, password: pass });
   msg.textContent = error ? error.message : 'ລົງທະບຽນສຳເລັດ! ກວດ Email ທ່ານ';
 }
+async function doLogout() { await sb.auth.signOut(); }
 
-async function doLogout() {
-  await sb.auth.signOut();
+// ===== REALTIME =====
+function setupRealtime() {
+  if (realtimeChannel) return;
+  realtimeChannel = sb.channel('survey-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'partners' }, () => { loadAll(); showToast('🔄 ຂໍ້ມູນ Partner ອັບເດດ', 'info', 2000); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => { loadAll(); showToast('🔄 ຂໍ້ມູນ ລູກຄ້າ ອັບເດດ', 'info', 2000); })
+    .subscribe(status => {
+      const dot = document.getElementById('rt-dot');
+      dot.style.display = status === 'SUBSCRIBED' ? 'inline-block' : 'none';
+    });
+}
+function teardownRealtime() {
+  if (realtimeChannel) { sb.removeChannel(realtimeChannel); realtimeChannel = null; }
+  document.getElementById('rt-dot').style.display = 'none';
 }
 
 // ===== MAP =====
 function initMap() {
-  leafletMap = L.map('map', { zoomControl: true, preferCanvas: true }).setView([17.97, 102.63], 13);
-
+  leafletMap = L.map('map', { zoomControl: true, preferCanvas: false }).setView([17.97, 102.63], 13);
   L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    attribution: '© OpenStreetMap © CARTO',
-    subdomains: 'abcd', maxZoom: 19, keepBuffer: 2
+    attribution: '© OpenStreetMap © CARTO', subdomains: 'abcd', maxZoom: 19
   }).addTo(leafletMap);
+
+  clusterGroup = L.markerClusterGroup({ maxClusterRadius: 50, disableClusteringAtZoom: 17 });
+  leafletMap.addLayer(clusterGroup);
 
   const LocateBtn = L.Control.extend({
     options: { position: 'topleft' },
     onAdd: function() {
       const btn = L.DomUtil.create('button', '');
-      btn.innerHTML = '📍';
-      btn.title = 'ຄົ້ນຫາຕຳແໜ່ງຂອງຂ້ອຍ';
+      btn.innerHTML = '📍'; btn.title = 'ຕຳແໜ່ງຂ້ອຍ';
       btn.style.cssText = 'width:34px;height:34px;background:#fff;border:2px solid rgba(0,0,0,0.2);border-radius:4px;cursor:pointer;font-size:16px;margin-top:4px;';
       L.DomEvent.on(btn, 'click', L.DomEvent.stop).on(btn, 'click', locateMe);
       return btn;
@@ -430,88 +509,65 @@ function initMap() {
       document.getElementById('modal').classList.add('open');
     }
   });
-
-  console.log('[Map] initialized');
 }
 
 let locateMarker = null;
 function locateMe() {
-  showToast('📡 ກຳລັງຄົ້ນຫາຕຳແໜ່ງ...', 'info', 2000);
+  showToast('📡 ກຳລັງຄົ້ນຫາ...', 'info', 2000);
   navigator.geolocation.getCurrentPosition(pos => {
     const { latitude: lat, longitude: lng } = pos.coords;
     leafletMap.setView([lat, lng], 17);
     if (locateMarker) leafletMap.removeLayer(locateMarker);
-    locateMarker = L.circleMarker([lat, lng], {
-      radius: 10, fillColor: '#378ADD', color: '#fff',
-      weight: 3, opacity: 1, fillOpacity: 0.9
-    }).addTo(leafletMap).bindPopup('📍 ຕຳແໜ່ງຂອງທ່ານ').openPopup();
-    showToast('✅ ພົບຕຳແໜ່ງແລ້ວ!', 'success');
-  }, () => {
-    showToast('❌ ບໍ່ສາມາດດຶງ GPS ໄດ້', 'error');
-  }, { enableHighAccuracy: true, timeout: 8000 });
+    locateMarker = L.circleMarker([lat, lng], { radius:10, fillColor:'#378ADD', color:'#fff', weight:3, fillOpacity:0.9 })
+      .addTo(leafletMap).bindPopup('📍 ຕຳແໜ່ງຂອງທ່ານ').openPopup();
+    showToast('✅ ພົບຕຳແໜ່ງ!', 'success');
+  }, () => showToast('❌ ດຶງ GPS ບໍ່ໄດ້', 'error'), { enableHighAccuracy: true, timeout: 8000 });
 }
 
 function makeIcon(status) {
   const color = MARKER_COLORS[status] || '#888780';
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="36" viewBox="0 0 28 36">
     <path d="M14 0C6.27 0 0 6.27 0 14c0 9.47 14 22 14 22S28 23.47 28 14C28 6.27 21.73 0 14 0z" fill="${color}"/>
-    <circle cx="14" cy="14" r="6" fill="white"/>
-  </svg>`;
-  return L.divIcon({
-    html: svg, className: '', iconSize: [28, 36], iconAnchor: [14, 36], popupAnchor: [0, -36]
-  });
+    <circle cx="14" cy="14" r="6" fill="white"/></svg>`;
+  return L.divIcon({ html: svg, className: '', iconSize: [28,36], iconAnchor: [14,36], popupAnchor: [0,-36] });
 }
 
 function renderMarkers() {
-  if (!leafletMap) {
-    console.warn('[renderMarkers] map not ready');
-    return;
-  }
-  Object.values(markers).forEach(m => leafletMap.removeLayer(m));
+  if (!leafletMap || !clusterGroup) return;
+  clusterGroup.clearLayers();
   markers = {};
-  const data = allData[currentTab];
-  console.log('[renderMarkers] rendering', data.length, 'records for tab:', currentTab);
-  data.forEach(rec => {
+  allData[currentTab].forEach(rec => {
     if (!rec.lat || !rec.lng) return;
-    const m = L.marker([rec.lat, rec.lng], { icon: makeIcon(rec.status) }).addTo(leafletMap);
-    const popupHtml = `<div class="map-popup">
+    const m = L.marker([rec.lat, rec.lng], { icon: makeIcon(rec.status) });
+    const canEdit = isAdmin || rec.created_by === currentUser?.id;
+    m.bindPopup(`<div class="map-popup">
       <div class="map-popup-name">${rec.name}</div>
       <div class="map-popup-info">📞 ${rec.phone || '-'}</div>
       <div class="map-popup-info">🏪 ${rec.business_type || rec.customer_type || '-'}</div>
       <div class="map-popup-info">📍 ${rec.location_name || ''}</div>
+      <div class="map-popup-info"><span class="status-badge status-${rec.status}">${STATUS_LABELS[rec.status]||rec.status}</span></div>
       <div class="map-popup-actions">
-        <button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>
-        <button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️ ລຶບ</button>
-      </div>
-    </div>`;
-    m.bindPopup(popupHtml, { maxWidth: 260 });
+        ${canEdit ? `<button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>` : ''}
+        ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️ ລຶບ</button>` : ''}
+      </div></div>`, { maxWidth: 260 });
+    clusterGroup.addLayer(m);
     markers[rec.id] = m;
   });
 }
 
 // ===== DATA =====
 async function loadAll() {
-  console.log('[loadAll] starting...');
   try {
     const [{ data: p, error: pe }, { data: c, error: ce }] = await Promise.all([
       sb.from('partners').select('*').order('created_at', { ascending: false }),
       sb.from('customers').select('*').order('created_at', { ascending: false })
     ]);
-
-    if (pe) console.error('[loadAll] partners error:', pe);
-    if (ce) console.error('[loadAll] customers error:', ce);
-
-    allData.partner = p || [];
-    allData.customer = c || [];
-
-    console.log('[loadAll] partners:', allData.partner.length, 'customers:', allData.customer.length);
-
-    renderMarkers();
-    renderList();
-    renderDash();
-  } catch (err) {
-    console.error('[loadAll] exception:', err);
-    showToast('❌ ໂຫຼດຂໍ້ມູນຜິດພາດ', 'error');
+    if (!pe) { allData.partner = p || []; saveToCache('partner', allData.partner); }
+    if (!ce) { allData.customer = c || []; saveToCache('customer', allData.customer); }
+    renderMarkers(); renderList(); renderDash();
+  } catch(err) {
+    console.error('[loadAll]', err);
+    loadFromCache();
   }
 }
 
@@ -521,60 +577,34 @@ async function saveRecord() {
   const phone = document.getElementById('f-phone').value.trim();
   const notes = document.getElementById('f-notes').value.trim();
   const status = document.querySelector('.status-opt.selected')?.dataset.val;
-
-  if (!name) { showToast('⚠️ ກະລຸນາໃສ່ຊື່ກ່ອນ', 'error'); return; }
-  if (!phone) { showToast('⚠️ ກະລຸນາໃສ່ເບີໂທກ່ອນ', 'error'); return; }
+  if (!name) { showToast('⚠️ ກະລຸນາໃສ່ຊື່', 'error'); return; }
+  if (!phone) { showToast('⚠️ ກະລຸນາໃສ່ເບີໂທ', 'error'); return; }
 
   const saveBtn = document.querySelector('.btn-save');
-  saveBtn.disabled = true;
-  saveBtn.textContent = '⏳ ກຳລັງບັນທຶກ...';
+  saveBtn.disabled = true; saveBtn.textContent = '⏳ ກຳລັງບັນທຶກ...';
 
   try {
     let photoUrl = null;
-    if (editPhotoFile) {
-      showToast('📷 ກຳລັງອັບໂຫຼດຮູບ...', 'info');
-      photoUrl = await uploadPhoto(editPhotoFile);
-    }
-
+    if (editPhotoFile) { showToast('📷 ອັບໂຫຼດຮູບ...', 'info'); photoUrl = await uploadPhoto(editPhotoFile); }
     const table = currentTab === 'partner' ? 'partners' : 'customers';
-    const { data: { user } } = await sb.auth.getUser();
-
     const payload = {
-      name, phone, notes, status,
-      lat: editLat, lng: editLng,
+      name, phone, notes, status, lat: editLat, lng: editLng,
       location_name: document.getElementById('loc-status').textContent,
-      created_by: user.id
+      created_by: currentUser.id
     };
-    if (currentTab === 'partner') {
-      payload.business_type = document.getElementById('f-business').value.trim();
-    } else {
-      payload.customer_type = document.getElementById('f-business').value.trim();
-      payload.budget = document.getElementById('f-budget').value.trim();
-    }
-    if (photoUrl) {
-      payload.photo_url = photoUrl;
-    } else if (id) {
-      const existing = allData[currentTab].find(r => r.id === id);
-      if (existing?.photo_url) payload.photo_url = existing.photo_url;
-    }
+    if (currentTab === 'partner') payload.business_type = document.getElementById('f-business').value.trim();
+    else { payload.customer_type = document.getElementById('f-business').value.trim(); payload.budget = document.getElementById('f-budget').value.trim(); }
+    if (photoUrl) payload.photo_url = photoUrl;
+    else if (id) { const ex = allData[currentTab].find(r => r.id === id); if (ex?.photo_url) payload.photo_url = ex.photo_url; }
 
-    const { error } = id
-      ? await sb.from(table).update(payload).eq('id', id)
-      : await sb.from(table).insert(payload);
-
+    const { error } = id ? await sb.from(table).update(payload).eq('id', id) : await sb.from(table).insert(payload);
     if (error) throw error;
-
     closeModal();
-    showToast(id ? '✅ ແກ້ໄຂສຳເລັດ!' : '✅ ເພີ່ມຂໍ້ມູນສຳເລັດ!', 'success');
+    showToast(id ? '✅ ແກ້ໄຂສຳເລັດ!' : '✅ ເພີ່ມສຳເລັດ!');
     await loadAll();
-
-  } catch (err) {
-    console.error(err);
-    showToast('❌ ເກີດຂໍ້ຜິດພາດ: ' + (err.message || 'ກະລຸນາລອງໃໝ່'), 'error', 5000);
-  } finally {
-    saveBtn.disabled = false;
-    saveBtn.textContent = '💾 ບັນທຶກ';
-  }
+  } catch(err) {
+    showToast('❌ ' + (err.message || 'ເກີດຂໍ້ຜິດພາດ'), 'error', 5000);
+  } finally { saveBtn.disabled = false; saveBtn.textContent = '💾 ບັນທຶກ'; }
 }
 
 async function deleteRecord(id) {
@@ -583,7 +613,7 @@ async function deleteRecord(id) {
   const { error } = await sb.from(table).delete().eq('id', id);
   document.querySelectorAll('.leaflet-popup-close-button').forEach(b => b.click());
   if (error) { showToast('❌ ລຶບບໍ່ສຳເລັດ', 'error'); return; }
-  showToast('🗑️ ລຶບສຳເລັດ', 'success');
+  showToast('🗑️ ລຶບສຳເລັດ');
   await loadAll();
 }
 
@@ -592,39 +622,60 @@ async function uploadPhoto(file) {
   const path = `${Date.now()}.${ext}`;
   const { error } = await sb.storage.from('survey-photos').upload(path, file);
   if (error) return null;
-  const { data } = sb.storage.from('survey-photos').getPublicUrl(path);
-  return data.publicUrl;
+  return sb.storage.from('survey-photos').getPublicUrl(path).data.publicUrl;
+}
+
+// ===== EXCEL EXPORT =====
+function exportExcel() {
+  const p = allData.partner.map(r => ({ ປະເພດ:'Partner', ຊື່:r.name, ເບີໂທ:r.phone, ທຸລະກິດ:r.business_type, ສະຖານະ:STATUS_LABELS[r.status]||r.status, ໝາຍເຫດ:r.notes, Location:r.location_name, ວັນທີ:r.created_at?.slice(0,10) }));
+  const c = allData.customer.map(r => ({ ປະເພດ:'ລູກຄ້າ', ຊື່:r.name, ເບີໂທ:r.phone, ທຸລະກິດ:r.customer_type, ສະຖານະ:STATUS_LABELS[r.status]||r.status, ໝາຍເຫດ:r.notes, Location:r.location_name, ວັນທີ:r.created_at?.slice(0,10) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([...p, ...c]), 'ທັງໝົດ');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(p), 'Partner');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(c), 'ລູກຄ້າ');
+  XLSX.writeFile(wb, `survey_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('📤 Export Excel ສຳເລັດ!');
 }
 
 // ===== LIST VIEW =====
 function renderList() {
   const container = document.getElementById('list-items');
   document.getElementById('list-loading').style.display = 'none';
-  const data = allData[currentTab];
+  const q = document.getElementById('search-input')?.value.toLowerCase() || '';
+  const fs = document.getElementById('filter-status')?.value || '';
+  let data = allData[currentTab];
+  if (q) data = data.filter(r => (r.name||'').toLowerCase().includes(q) || (r.phone||'').includes(q) || (r.business_type||r.customer_type||'').toLowerCase().includes(q));
+  if (fs) data = data.filter(r => r.status === fs);
   if (!data.length) { container.innerHTML = '<div class="loading">ຍັງບໍ່ມີຂໍ້ມູນ<br>ກົດ + ເພື່ອເພີ່ມ</div>'; return; }
+
+  function hl(text) {
+    if (!q || !text) return text || '';
+    return text.replace(new RegExp(`(${q})`, 'gi'), '<mark class="highlight">$1</mark>');
+  }
+  const canEdit = (rec) => isAdmin || rec.created_by === currentUser?.id;
+
   container.innerHTML = data.map(rec => {
     const typeFld = currentTab === 'partner' ? rec.business_type : rec.customer_type;
     const extra = currentTab === 'customer' && rec.budget ? `💰 ${rec.budget}` : '';
-    const photoHtml = rec.photo_url
-      ? `<img src="${rec.photo_url}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:8px;" onerror="this.style.display='none'"/>`
-      : '';
+    const photoHtml = rec.photo_url ? `<img src="${rec.photo_url}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:8px;" onerror="this.style.display='none'"/>` : '';
     return `<div class="record-card">
       <div class="record-card-header">
         <div style="flex:1;min-width:0;">
-          <div class="record-name">${rec.name}</div>
-          <div class="record-info">📞 ${rec.phone || '-'}</div>
-          ${typeFld ? `<div class="record-info">🏪 ${typeFld}</div>` : ''}
+          <div class="record-name">${hl(rec.name)}</div>
+          <div class="record-info">📞 ${hl(rec.phone||'-')}</div>
+          ${typeFld ? `<div class="record-info">🏪 ${hl(typeFld)}</div>` : ''}
           ${extra ? `<div class="record-info">${extra}</div>` : ''}
           ${rec.location_name ? `<div class="record-info">📍 ${rec.location_name}</div>` : ''}
+          <div class="record-info" style="color:var(--text3);font-size:0.75rem;">📅 ${rec.created_at?.slice(0,10)||''}</div>
         </div>
         <span class="status-badge status-${rec.status}">${STATUS_LABELS[rec.status]||rec.status}</span>
       </div>
-      ${rec.notes ? `<div class="record-info" style="margin-top:4px;font-style:italic;">💬 ${rec.notes}</div>` : ''}
+      ${rec.notes ? `<div class="record-info" style="font-style:italic;">💬 ${rec.notes}</div>` : ''}
       ${photoHtml}
       <div class="record-actions">
-        <button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>
+        ${canEdit(rec) ? `<button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>` : ''}
         ${rec.lat ? `<button class="btn-sm" onclick="flyTo(${rec.lat},${rec.lng})">🗺️ ແຜນທີ່</button>` : ''}
-        <button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️</button>
+        ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -638,56 +689,135 @@ function flyTo(lat, lng) {
 // ===== DASHBOARD =====
 function renderDash() {
   const today = new Date().toDateString();
-  const thisMonth = new Date().toISOString().slice(0, 7);
-  const tp = allData.partner.filter(r => new Date(r.created_at).toDateString() === today).length;
-  const tc = allData.customer.filter(r => new Date(r.created_at).toDateString() === today).length;
-  const mp = allData.partner.filter(r => r.created_at?.startsWith(thisMonth)).length;
-  const mc = allData.customer.filter(r => r.created_at?.startsWith(thisMonth)).length;
-  document.getElementById('dash-today-p').textContent = tp;
-  document.getElementById('dash-today-c').textContent = tc;
-  document.getElementById('dash-month-p').textContent = mp;
-  document.getElementById('dash-month-c').textContent = mc;
+  document.getElementById('dash-total-p').textContent = allData.partner.length;
+  document.getElementById('dash-total-c').textContent = allData.customer.length;
+  document.getElementById('dash-today-p').textContent = allData.partner.filter(r => new Date(r.created_at).toDateString()===today).length;
+  document.getElementById('dash-today-c').textContent = allData.customer.filter(r => new Date(r.created_at).toDateString()===today).length;
 
   const renderStatus = (data, statuses, containerId) => {
-    const counts = {};
-    statuses.forEach(s => counts[s.val] = 0);
-    data.forEach(r => { if (counts[r.status] !== undefined) counts[r.status]++; });
+    const counts = {}; statuses.forEach(s => counts[s.val] = 0);
+    data.forEach(r => { if (counts[r.status]!==undefined) counts[r.status]++; });
     document.getElementById(containerId).innerHTML = statuses.map(s => {
-      const dot = s.val === 'not_interested' ? 'dot-red' : s.val === 'considering' ? 'dot-amber' : 'dot-green';
-      return `<div class="status-row"><span><span class="status-dot ${dot}"></span>${s.label.split(' ')[1]}</span><strong>${counts[s.val]}</strong></div>`;
+      const dot = s.val==='not_interested'?'dot-red':s.val==='considering'?'dot-amber':'dot-green';
+      const pct = data.length ? Math.round(counts[s.val]/data.length*100) : 0;
+      return `<div class="status-row"><span><span class="status-dot ${dot}"></span>${s.label.split(' ')[1]}</span><strong>${counts[s.val]} (${pct}%)</strong></div>`;
     }).join('');
+    return counts;
   };
-  renderStatus(allData.partner, STATUS_CONFIG.partner, 'dash-partner-status');
-  renderStatus(allData.customer, STATUS_CONFIG.customer, 'dash-customer-status');
 
-  const recent = [...allData.partner.map(r => ({...r, _type:'Partner'})), ...allData.customer.map(r => ({...r, _type:'ລູກຄ້າ'}))]
-    .sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
+  const pc = renderStatus(allData.partner, STATUS_CONFIG.partner, 'dash-partner-status');
+  const cc = renderStatus(allData.customer, STATUS_CONFIG.customer, 'dash-customer-status');
+
+  // Charts
+  const chartOpts = (labels, data, colors) => ({
+    type: 'doughnut',
+    data: { labels, datasets: [{ data, backgroundColor: colors, borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 11 } } } } }
+  });
+
+  if (chartPartner) chartPartner.destroy();
+  chartPartner = new Chart(document.getElementById('chart-partner'), chartOpts(
+    ['ເຂົ້າຮ່ວມ','ພິຈາລະນາ','ບໍ່ສົນໃຈ'], [pc.joined, pc.considering, pc.not_interested], ['#1D9E75','#BA7517','#E24B4A']
+  ));
+
+  if (chartCustomer) chartCustomer.destroy();
+  chartCustomer = new Chart(document.getElementById('chart-customer'), chartOpts(
+    ['ສົນໃຈ','ພິຈາລະນາ','ບໍ່ສົນໃຈ'], [cc.interested, cc.considering, cc.not_interested], ['#1D9E75','#BA7517','#E24B4A']
+  ));
+
+  // Trend chart (7 days)
+  const days = [...Array(7)].map((_,i) => { const d = new Date(); d.setDate(d.getDate()-6+i); return d; });
+  const labels7 = days.map(d => `${d.getDate()}/${d.getMonth()+1}`);
+  const pCount = days.map(d => allData.partner.filter(r => new Date(r.created_at).toDateString()===d.toDateString()).length);
+  const cCount = days.map(d => allData.customer.filter(r => new Date(r.created_at).toDateString()===d.toDateString()).length);
+  if (chartTrend) chartTrend.destroy();
+  chartTrend = new Chart(document.getElementById('chart-trend'), {
+    type: 'bar',
+    data: { labels: labels7, datasets: [
+      { label: 'Partner', data: pCount, backgroundColor: '#1D9E75' },
+      { label: 'ລູກຄ້າ', data: cCount, backgroundColor: '#378ADD' }
+    ]},
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+  });
+
+  const recent = [...allData.partner.map(r=>({...r,_t:'Partner'})), ...allData.customer.map(r=>({...r,_t:'ລູກຄ້າ'}))]
+    .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,5);
   document.getElementById('dash-recent').innerHTML = recent.map(r =>
-    `<div class="status-row"><span>${r._type}: ${r.name}</span><span class="status-badge status-${r.status}">${STATUS_LABELS[r.status]}</span></div>`
+    `<div class="status-row"><span>${r._t}: ${r.name}</span><span class="status-badge status-${r.status}">${STATUS_LABELS[r.status]}</span></div>`
   ).join('') || '<div style="color:var(--text3);font-size:0.85rem;padding:8px 0">ຍັງບໍ່ມີຂໍ້ມູນ</div>';
+}
+
+// ===== ADMIN =====
+async function showAdmin() {
+  if (!isAdmin) return;
+  document.getElementById('map-view').style.display = 'none';
+  document.getElementById('list-view').style.display = 'none';
+  document.getElementById('dash-view').style.display = 'none';
+  document.getElementById('admin-view').style.display = 'flex';
+  document.getElementById('fab-btn').style.display = 'none';
+  await loadAdminData();
+}
+
+async function loadAdminData() {
+  try {
+    const { data: admins } = await sb.from('admins').select('*');
+    document.getElementById('admin-users-list').innerHTML = (admins||[]).map(a =>
+      `<div class="admin-user-row"><span>👑 ${a.email||a.user_id}</span><button class="btn-sm danger" onclick="removeAdmin('${a.id}')">ລຶບ</button></div>`
+    ).join('') || '<div style="color:var(--text3)">ຍັງບໍ່ມີ Admin ເພີ່ມ</div>';
+
+    // team stats
+    const allRecs = [...allData.partner, ...allData.customer];
+    const byUser = {};
+    allRecs.forEach(r => { byUser[r.created_by] = (byUser[r.created_by]||0)+1; });
+    document.getElementById('admin-team-stats').innerHTML = Object.entries(byUser)
+      .sort((a,b)=>b[1]-a[1])
+      .map(([uid, cnt]) => `<div class="status-row"><span>👤 ${uid.slice(0,8)}...</span><strong>${cnt} ລາຍການ</strong></div>`).join('') || '<div style="color:var(--text3)">ຍັງບໍ່ມີຂໍ້ມູນ</div>';
+  } catch(e) { console.error(e); }
+}
+
+async function addAdmin() {
+  const email = document.getElementById('new-admin-email').value.trim();
+  if (!email) return;
+  const { error } = await sb.from('admins').insert({ email });
+  if (error) { showToast('❌ ເພີ່ມ Admin ບໍ່ສຳເລັດ', 'error'); return; }
+  showToast('✅ ເພີ່ມ Admin ສຳເລັດ');
+  document.getElementById('new-admin-email').value = '';
+  await loadAdminData();
+}
+
+async function removeAdmin(id) {
+  if (!confirm('ລຶບ Admin ນີ້ບໍ?')) return;
+  await sb.from('admins').delete().eq('id', id);
+  showToast('🗑️ ລຶບ Admin ສຳເລັດ');
+  await loadAdminData();
 }
 
 // ===== TABS & VIEWS =====
 function switchTab(tab) {
   currentTab = tab;
-  document.getElementById('tab-partner').classList.toggle('active', tab === 'partner');
-  document.getElementById('tab-customer').classList.toggle('active', tab === 'customer');
-  renderMarkers();
-  renderList();
+  document.getElementById('tab-partner').classList.toggle('active', tab==='partner');
+  document.getElementById('tab-customer').classList.toggle('active', tab==='customer');
+  renderMarkers(); renderList();
 }
 function switchView(view) {
   currentView = view;
-  document.getElementById('vbtn-map').classList.toggle('active', view === 'map');
-  document.getElementById('vbtn-list').classList.toggle('active', view === 'list');
-  document.getElementById('map-view').style.display = view === 'map' ? 'flex' : 'none';
-  document.getElementById('list-view').style.display = view === 'list' ? 'flex' : 'none';
+  ['map','list'].forEach(v => {
+    document.getElementById(`vbtn-${v}`).classList.toggle('active', v===view);
+    document.getElementById(`${v}-view`).style.display = v===view ? 'flex' : 'none';
+  });
   document.getElementById('dash-view').style.display = 'none';
-  if (view === 'map') setTimeout(() => leafletMap.invalidateSize(), 100);
+  document.getElementById('admin-view').style.display = 'none';
+  document.getElementById('fab-btn').style.display = 'flex';
+  document.getElementById('search-bar').classList.toggle('show', view==='list');
+  if (view==='map') setTimeout(() => leafletMap.invalidateSize(), 100);
 }
 function showDash() {
   document.getElementById('map-view').style.display = 'none';
   document.getElementById('list-view').style.display = 'none';
   document.getElementById('dash-view').style.display = 'flex';
+  document.getElementById('admin-view').style.display = 'none';
+  document.getElementById('fab-btn').style.display = 'flex';
+  document.getElementById('search-bar').classList.remove('show');
   renderDash();
 }
 
@@ -695,79 +825,65 @@ function showDash() {
 let selectedStatus = null;
 function openAddModal() {
   document.getElementById('edit-id').value = '';
-  document.getElementById('f-name').value = '';
-  document.getElementById('f-phone').value = '';
-  document.getElementById('f-business').value = '';
-  document.getElementById('f-budget').value = '';
-  document.getElementById('f-notes').value = '';
+  ['f-name','f-phone','f-business','f-budget','f-notes'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('loc-status').textContent = 'ຍັງບໍ່ໄດ້ເລືອກ location';
   document.getElementById('photo-preview').classList.add('hidden');
   editLat = editLng = editPhotoFile = null;
   selectedStatus = 'considering';
-  renderStatusSelector();
-  renderModalFields();
-  document.getElementById('modal-title').textContent = currentTab === 'partner' ? 'ເພີ່ມ Partner ໃໝ່' : 'ເພີ່ມ ລູກຄ້າ ໃໝ່';
+  renderStatusSelector(); renderModalFields();
+  document.getElementById('modal-title').textContent = currentTab==='partner' ? 'ເພີ່ມ Partner ໃໝ່' : 'ເພີ່ມ ລູກຄ້າ ໃໝ່';
   document.getElementById('modal').classList.add('open');
 }
 function openEditModal(id) {
-  const rec = allData[currentTab].find(r => r.id === id);
+  const rec = allData[currentTab].find(r => r.id===id);
   if (!rec) return;
   document.getElementById('edit-id').value = id;
-  document.getElementById('f-name').value = rec.name || '';
-  document.getElementById('f-phone').value = rec.phone || '';
-  document.getElementById('f-business').value = rec.business_type || rec.customer_type || '';
-  document.getElementById('f-budget').value = rec.budget || '';
-  document.getElementById('f-notes').value = rec.notes || '';
+  document.getElementById('f-name').value = rec.name||'';
+  document.getElementById('f-phone').value = rec.phone||'';
+  document.getElementById('f-business').value = rec.business_type||rec.customer_type||'';
+  document.getElementById('f-budget').value = rec.budget||'';
+  document.getElementById('f-notes').value = rec.notes||'';
   editLat = rec.lat; editLng = rec.lng;
-  document.getElementById('loc-status').textContent = rec.location_name || (rec.lat ? `${rec.lat.toFixed(5)}, ${rec.lng.toFixed(5)}` : 'ຍັງບໍ່ມີ');
-  selectedStatus = rec.status;
-  editPhotoFile = null;
-  if (rec.photo_url) {
-    const prev = document.getElementById('photo-preview');
-    prev.src = rec.photo_url; prev.classList.remove('hidden');
-  } else document.getElementById('photo-preview').classList.add('hidden');
-  renderStatusSelector();
-  renderModalFields();
-  document.getElementById('modal-title').textContent = currentTab === 'partner' ? 'ແກ້ໄຂ Partner' : 'ແກ້ໄຂ ລູກຄ້າ';
+  document.getElementById('loc-status').textContent = rec.location_name||(rec.lat?`${rec.lat.toFixed(5)}, ${rec.lng.toFixed(5)}`:'ຍັງບໍ່ມີ');
+  selectedStatus = rec.status; editPhotoFile = null;
+  if (rec.photo_url) { document.getElementById('photo-preview').src=rec.photo_url; document.getElementById('photo-preview').classList.remove('hidden'); }
+  else document.getElementById('photo-preview').classList.add('hidden');
+  renderStatusSelector(); renderModalFields();
+  document.getElementById('modal-title').textContent = currentTab==='partner' ? 'ແກ້ໄຂ Partner' : 'ແກ້ໄຂ ລູກຄ້າ';
   document.getElementById('modal').classList.add('open');
 }
 function closeModal() {
   document.getElementById('modal').classList.remove('open');
-  editPhotoFile = null;
-  document.getElementById('f-photo').value = '';
+  editPhotoFile = null; document.getElementById('f-photo').value = '';
 }
-
 function renderStatusSelector() {
-  const opts = STATUS_CONFIG[currentTab];
-  document.getElementById('status-selector').innerHTML = opts.map(o =>
-    `<div class="status-opt ${o.val === selectedStatus ? 'selected' : ''}" data-val="${o.val}" onclick="selectStatus('${o.val}')">${o.label}</div>`
+  document.getElementById('status-selector').innerHTML = STATUS_CONFIG[currentTab].map(o =>
+    `<div class="status-opt ${o.val===selectedStatus?'selected':''}" data-val="${o.val}" onclick="selectStatus('${o.val}')">${o.label}</div>`
   ).join('');
 }
 function selectStatus(val) {
   selectedStatus = val;
-  document.querySelectorAll('.status-opt').forEach(el => el.classList.toggle('selected', el.dataset.val === val));
+  document.querySelectorAll('.status-opt').forEach(el => el.classList.toggle('selected', el.dataset.val===val));
 }
 function renderModalFields() {
-  const isCustomer = currentTab === 'customer';
+  const isCustomer = currentTab==='customer';
   document.getElementById('fg-budget').classList.toggle('hidden', !isCustomer);
-  document.getElementById('business-label').textContent = isCustomer ? 'ປະເພດລູກຄ້າ / ທຸລະກິດ' : 'ປະເພດທຸລະກິດ / ສິນຄ້າທີ່ຂາຍ';
+  document.getElementById('business-label').textContent = isCustomer ? 'ປະເພດລູກຄ້າ / ທຸລະກິດ' : 'ປະເພດທຸລະກິດ / ສິນຄ້າ';
 }
 
 // ===== LOCATION =====
 function useCurrentLocation() {
   document.getElementById('loc-status').textContent = 'ກຳລັງດຶງ GPS...';
-  navigator.geolocation.getCurrentPosition(pos => {
-    setModalLocation(pos.coords.latitude, pos.coords.longitude, 'GPS ປັດຈຸບັນ');
-  }, () => {
-    document.getElementById('loc-status').textContent = 'ບໍ່ສາມາດດຶງ GPS ໄດ້';
-  }, { enableHighAccuracy: true });
+  navigator.geolocation.getCurrentPosition(
+    pos => setModalLocation(pos.coords.latitude, pos.coords.longitude, 'GPS ປັດຈຸບັນ'),
+    () => { document.getElementById('loc-status').textContent = 'ດຶງ GPS ບໍ່ໄດ້'; },
+    { enableHighAccuracy: true }
+  );
 }
 function pickOnMap() {
-  closeModal();
-  pickingLocation = true;
+  closeModal(); pickingLocation = true;
   leafletMap.getContainer().style.cursor = 'crosshair';
-  switchView('map');
-  alert('ກົດໃສ່ແຜນທີ່ ເພື່ອເລືອກ location');
+  switchView('map'); alert('ກົດໃສ່ແຜນທີ່ ເພື່ອເລືອກ location');
 }
 function setModalLocation(lat, lng, name) {
   editLat = lat; editLng = lng;
@@ -779,21 +895,12 @@ function handlePhoto(input) {
   if (!input.files[0]) return;
   editPhotoFile = input.files[0];
   const reader = new FileReader();
-  reader.onload = e => {
-    const prev = document.getElementById('photo-preview');
-    prev.src = e.target.result; prev.classList.remove('hidden');
-  };
+  reader.onload = e => { document.getElementById('photo-preview').src=e.target.result; document.getElementById('photo-preview').classList.remove('hidden'); };
   reader.readAsDataURL(editPhotoFile);
 }
 
-// Close modal on overlay click
-document.getElementById('modal').addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
-});
-
-document.getElementById('modal').addEventListener('touchmove', function(e) {
-  if (e.target === this) e.preventDefault();
-}, { passive: false });
+document.getElementById('modal').addEventListener('click', function(e) { if (e.target===this) closeModal(); });
+document.getElementById('modal').addEventListener('touchmove', function(e) { if (e.target===this) e.preventDefault(); }, { passive: false });
 </script>
 </body>
 </html>
