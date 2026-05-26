@@ -375,6 +375,29 @@ const STATUS_CONFIG = {
 const STATUS_LABELS = { joined:'ເຂົ້າຮ່ວມ', interested:'ສົນໃຈ', considering:'ພິຈາລະນາ', not_interested:'ບໍ່ສົນໃຈ' };
 const MARKER_COLORS = { joined:'#1D9E75', interested:'#1D9E75', considering:'#BA7517', not_interested:'#E24B4A' };
 
+// ===== SAFETY HELPERS =====
+function escapeHTML(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+function escapeAttr(value) { return escapeHTML(value); }
+function escapeRegExp(value) { return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function getRecordTypeById(id) {
+  if (allData.partner.some(r => r.id === id)) return 'partner';
+  if (allData.customer.some(r => r.id === id)) return 'customer';
+  return currentTab;
+}
+function tableNameFor(type) { return type === 'partner' ? 'partners' : 'customers'; }
+function isValidStatus(type, status) { return STATUS_CONFIG[type].some(s => s.val === status); }
+function isValidImageFile(file) {
+  return file && file.type?.startsWith('image/') && file.size <= 5 * 1024 * 1024;
+}
+
+
 // ===== OFFLINE =====
 window.addEventListener('online', () => { document.getElementById('offline-badge').classList.remove('show'); loadAll(); });
 window.addEventListener('offline', () => { document.getElementById('offline-badge').classList.add('show'); loadFromCache(); });
@@ -420,13 +443,23 @@ function waitForMap() {
 }
 
 async function checkAdmin() {
-  // ກວດ email ຫຼື admins table
-  if (currentUser?.email === ADMIN_EMAIL) { isAdmin = true; }
-  else {
+  isAdmin = false;
+  if (!currentUser) return;
+
+  if (currentUser.email === ADMIN_EMAIL) {
+    isAdmin = true;
+  } else {
     try {
-      const { data } = await sb.from('admins').select('id').eq('user_id', currentUser.id).maybeSingle();
+      const { data } = await sb
+        .from('admins')
+        .select('id')
+        .or(`user_id.eq.${currentUser.id},email.eq.${currentUser.email}`)
+        .maybeSingle();
       isAdmin = !!data;
-    } catch(e) { isAdmin = false; }
+    } catch(e) {
+      console.error('[checkAdmin]', e);
+      isAdmin = false;
+    }
   }
   document.getElementById('admin-btn').style.display = isAdmin ? 'block' : 'none';
 }
@@ -540,15 +573,21 @@ function renderMarkers() {
     if (!rec.lat || !rec.lng) return;
     const m = L.marker([rec.lat, rec.lng], { icon: makeIcon(rec.status) });
     const canEdit = isAdmin || rec.created_by === currentUser?.id;
+    const safeId = escapeAttr(rec.id);
+    const safeStatus = isValidStatus(currentTab, rec.status) ? rec.status : STATUS_CONFIG[currentTab][0].val;
+    const safeName = escapeHTML(rec.name);
+    const safePhone = escapeHTML(rec.phone || '-');
+    const safeType = escapeHTML(rec.business_type || rec.customer_type || '-');
+    const safeLocation = escapeHTML(rec.location_name || '');
     m.bindPopup(`<div class="map-popup">
-      <div class="map-popup-name">${rec.name}</div>
-      <div class="map-popup-info">📞 ${rec.phone || '-'}</div>
-      <div class="map-popup-info">🏪 ${rec.business_type || rec.customer_type || '-'}</div>
-      <div class="map-popup-info">📍 ${rec.location_name || ''}</div>
-      <div class="map-popup-info"><span class="status-badge status-${rec.status}">${STATUS_LABELS[rec.status]||rec.status}</span></div>
+      <div class="map-popup-name">${safeName}</div>
+      <div class="map-popup-info">📞 ${safePhone}</div>
+      <div class="map-popup-info">🏪 ${safeType}</div>
+      <div class="map-popup-info">📍 ${safeLocation}</div>
+      <div class="map-popup-info"><span class="status-badge status-${safeStatus}">${escapeHTML(STATUS_LABELS[safeStatus]||safeStatus)}</span></div>
       <div class="map-popup-actions">
-        ${canEdit ? `<button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>` : ''}
-        ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️ ລຶບ</button>` : ''}
+        ${canEdit ? `<button class="btn-sm primary" onclick="openEditModal('${safeId}')">✏️ ແກ້ໄຂ</button>` : ''}
+        ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${safeId}','${currentTab}')">🗑️ ລຶບ</button>` : ''}
       </div></div>`, { maxWidth: 260 });
     clusterGroup.addLayer(m);
     markers[rec.id] = m;
@@ -579,6 +618,8 @@ async function saveRecord() {
   const status = document.querySelector('.status-opt.selected')?.dataset.val;
   if (!name) { showToast('⚠️ ກະລຸນາໃສ່ຊື່', 'error'); return; }
   if (!phone) { showToast('⚠️ ກະລຸນາໃສ່ເບີໂທ', 'error'); return; }
+  if (!isValidStatus(currentTab, status)) { showToast('⚠️ ກະລຸນາເລືອກສະຖານະ', 'error'); return; }
+  if (editPhotoFile && !isValidImageFile(editPhotoFile)) { showToast('⚠️ ຮູບຕ້ອງເປັນ image ແລະ ບໍ່ເກີນ 5MB', 'error'); return; }
 
   const saveBtn = document.querySelector('.btn-save');
   saveBtn.disabled = true; saveBtn.textContent = '⏳ ກຳລັງບັນທຶກ...';
@@ -586,7 +627,7 @@ async function saveRecord() {
   try {
     let photoUrl = null;
     if (editPhotoFile) { showToast('📷 ອັບໂຫຼດຮູບ...', 'info'); photoUrl = await uploadPhoto(editPhotoFile); }
-    const table = currentTab === 'partner' ? 'partners' : 'customers';
+    const table = tableNameFor(currentTab);
     const payload = {
       name, phone, notes, status, lat: editLat, lng: editLng,
       location_name: document.getElementById('loc-status').textContent,
@@ -607,21 +648,24 @@ async function saveRecord() {
   } finally { saveBtn.disabled = false; saveBtn.textContent = '💾 ບັນທຶກ'; }
 }
 
-async function deleteRecord(id) {
+async function deleteRecord(id, type = null) {
+  if (!isAdmin) { showToast('❌ ມີແຕ່ Admin ທີ່ລຶບໄດ້', 'error'); return; }
+  const recordType = type || getRecordTypeById(id);
   if (!confirm('ທ່ານຕ້ອງການລຶບລາຍການນີ້ບໍ?')) return;
-  const table = currentTab === 'partner' ? 'partners' : 'customers';
+  const table = tableNameFor(recordType);
   const { error } = await sb.from(table).delete().eq('id', id);
   document.querySelectorAll('.leaflet-popup-close-button').forEach(b => b.click());
-  if (error) { showToast('❌ ລຶບບໍ່ສຳເລັດ', 'error'); return; }
+  if (error) { showToast('❌ ລຶບບໍ່ສຳເລັດ: ' + (error.message || ''), 'error', 5000); return; }
   showToast('🗑️ ລຶບສຳເລັດ');
   await loadAll();
 }
 
 async function uploadPhoto(file) {
-  const ext = file.name.split('.').pop();
-  const path = `${Date.now()}.${ext}`;
-  const { error } = await sb.storage.from('survey-photos').upload(path, file);
-  if (error) return null;
+  if (!isValidImageFile(file)) throw new Error('ຟາຍຮູບບໍ່ຖືກຕ້ອງ ຫຼື ໃຫຍ່ເກີນ 5MB');
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+  const path = `${currentUser.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await sb.storage.from('survey-photos').upload(path, file, { upsert: false, contentType: file.type });
+  if (error) throw error;
   return sb.storage.from('survey-photos').getPublicUrl(path).data.publicUrl;
 }
 
@@ -649,15 +693,19 @@ function renderList() {
   if (!data.length) { container.innerHTML = '<div class="loading">ຍັງບໍ່ມີຂໍ້ມູນ<br>ກົດ + ເພື່ອເພີ່ມ</div>'; return; }
 
   function hl(text) {
-    if (!q || !text) return text || '';
-    return text.replace(new RegExp(`(${q})`, 'gi'), '<mark class="highlight">$1</mark>');
+    const safe = escapeHTML(text || '');
+    if (!q || !safe) return safe;
+    return safe.replace(new RegExp(`(${escapeRegExp(q)})`, 'gi'), '<mark class="highlight">$1</mark>');
   }
   const canEdit = (rec) => isAdmin || rec.created_by === currentUser?.id;
 
   container.innerHTML = data.map(rec => {
     const typeFld = currentTab === 'partner' ? rec.business_type : rec.customer_type;
-    const extra = currentTab === 'customer' && rec.budget ? `💰 ${rec.budget}` : '';
-    const photoHtml = rec.photo_url ? `<img src="${rec.photo_url}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:8px;" onerror="this.style.display='none'"/>` : '';
+    const extra = currentTab === 'customer' && rec.budget ? `💰 ${escapeHTML(rec.budget)}` : '';
+    const safeId = escapeAttr(rec.id);
+    const safeStatus = isValidStatus(currentTab, rec.status) ? rec.status : STATUS_CONFIG[currentTab][0].val;
+    const photoUrl = String(rec.photo_url || '');
+    const photoHtml = photoUrl.startsWith('http') ? `<img src="${escapeAttr(photoUrl)}" style="width:100%;max-height:140px;object-fit:cover;border-radius:8px;margin-top:8px;" onerror="this.style.display='none'"/>` : '';
     return `<div class="record-card">
       <div class="record-card-header">
         <div style="flex:1;min-width:0;">
@@ -665,17 +713,17 @@ function renderList() {
           <div class="record-info">📞 ${hl(rec.phone||'-')}</div>
           ${typeFld ? `<div class="record-info">🏪 ${hl(typeFld)}</div>` : ''}
           ${extra ? `<div class="record-info">${extra}</div>` : ''}
-          ${rec.location_name ? `<div class="record-info">📍 ${rec.location_name}</div>` : ''}
-          <div class="record-info" style="color:var(--text3);font-size:0.75rem;">📅 ${rec.created_at?.slice(0,10)||''}</div>
+          ${rec.location_name ? `<div class="record-info">📍 ${escapeHTML(rec.location_name)}</div>` : ''}
+          <div class="record-info" style="color:var(--text3);font-size:0.75rem;">📅 ${escapeHTML(rec.created_at?.slice(0,10)||'')}</div>
         </div>
-        <span class="status-badge status-${rec.status}">${STATUS_LABELS[rec.status]||rec.status}</span>
+        <span class="status-badge status-${safeStatus}">${escapeHTML(STATUS_LABELS[safeStatus]||safeStatus)}</span>
       </div>
-      ${rec.notes ? `<div class="record-info" style="font-style:italic;">💬 ${rec.notes}</div>` : ''}
+      ${rec.notes ? `<div class="record-info" style="font-style:italic;">💬 ${escapeHTML(rec.notes)}</div>` : ''}
       ${photoHtml}
       <div class="record-actions">
-        ${canEdit(rec) ? `<button class="btn-sm primary" onclick="openEditModal('${rec.id}')">✏️ ແກ້ໄຂ</button>` : ''}
-        ${rec.lat ? `<button class="btn-sm" onclick="flyTo(${rec.lat},${rec.lng})">🗺️ ແຜນທີ່</button>` : ''}
-        ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${rec.id}')">🗑️</button>` : ''}
+        ${canEdit(rec) ? `<button class="btn-sm primary" onclick="openEditModal('${safeId}')">✏️ ແກ້ໄຂ</button>` : ''}
+        ${rec.lat ? `<button class="btn-sm" onclick="flyTo(${Number(rec.lat)},${Number(rec.lng)})">🗺️ ແຜນທີ່</button>` : ''}
+        ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${safeId}','${currentTab}')">🗑️</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -743,7 +791,7 @@ function renderDash() {
   const recent = [...allData.partner.map(r=>({...r,_t:'Partner'})), ...allData.customer.map(r=>({...r,_t:'ລູກຄ້າ'}))]
     .sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,5);
   document.getElementById('dash-recent').innerHTML = recent.map(r =>
-    `<div class="status-row"><span>${r._t}: ${r.name}</span><span class="status-badge status-${r.status}">${STATUS_LABELS[r.status]}</span></div>`
+    `<div class="status-row"><span>${escapeHTML(r._t)}: ${escapeHTML(r.name)}</span><span class="status-badge status-${r.status}">${escapeHTML(STATUS_LABELS[r.status]||r.status)}</span></div>`
   ).join('') || '<div style="color:var(--text3);font-size:0.85rem;padding:8px 0">ຍັງບໍ່ມີຂໍ້ມູນ</div>';
 }
 
@@ -762,7 +810,7 @@ async function loadAdminData() {
   try {
     const { data: admins } = await sb.from('admins').select('*');
     document.getElementById('admin-users-list').innerHTML = (admins||[]).map(a =>
-      `<div class="admin-user-row"><span>👑 ${a.email||a.user_id}</span><button class="btn-sm danger" onclick="removeAdmin('${a.id}')">ລຶບ</button></div>`
+      `<div class="admin-user-row"><span>👑 ${escapeHTML(a.email||a.user_id)}</span><button class="btn-sm danger" onclick="removeAdmin('${escapeAttr(a.id)}')">ລຶບ</button></div>`
     ).join('') || '<div style="color:var(--text3)">ຍັງບໍ່ມີ Admin ເພີ່ມ</div>';
 
     // team stats
@@ -776,9 +824,9 @@ async function loadAdminData() {
 }
 
 async function addAdmin() {
-  const email = document.getElementById('new-admin-email').value.trim();
-  if (!email) return;
-  const { error } = await sb.from('admins').insert({ email });
+  const email = document.getElementById('new-admin-email').value.trim().toLowerCase();
+  if (!email || !email.includes('@')) { showToast('⚠️ ໃສ່ email ໃຫ້ຖືກຕ້ອງ', 'error'); return; }
+  const { error } = await sb.from('admins').upsert({ email }, { onConflict: 'email' });
   if (error) { showToast('❌ ເພີ່ມ Admin ບໍ່ສຳເລັດ', 'error'); return; }
   showToast('✅ ເພີ່ມ Admin ສຳເລັດ');
   document.getElementById('new-admin-email').value = '';
@@ -787,7 +835,8 @@ async function addAdmin() {
 
 async function removeAdmin(id) {
   if (!confirm('ລຶບ Admin ນີ້ບໍ?')) return;
-  await sb.from('admins').delete().eq('id', id);
+  const { error } = await sb.from('admins').delete().eq('id', id);
+  if (error) { showToast('❌ ລຶບ Admin ບໍ່ສຳເລັດ', 'error'); return; }
   showToast('🗑️ ລຶບ Admin ສຳເລັດ');
   await loadAdminData();
 }
