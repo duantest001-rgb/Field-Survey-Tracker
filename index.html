@@ -197,7 +197,7 @@
   <div class="offline-badge" id="offline-badge">📵 Offline Mode</div>
 
   <div class="topbar">
-    <div class="topbar-title">📍 Survey Tracker <span class="rt-dot" id="rt-dot" style="display:none"></span></div>
+    <div class="topbar-title">📍 Survey Tracker <span class="rt-dot" id="rt-dot" style="display:none"></span><span id="user-role-badge" style="font-size:0.72rem;color:var(--text2);margin-left:8px"></span></div>
     <div class="topbar-right">
       <button class="icon-btn" id="admin-btn" onclick="showAdmin()" style="display:none">👑 Admin</button>
       <button class="icon-btn" onclick="exportExcel()">📤 Excel</button>
@@ -370,6 +370,7 @@ let editLat = null, editLng = null;
 let editPhotoFile = null;
 let pickingLocation = false;
 let currentUser = null;
+let currentUserRole = 'anonymous';
 let isAdmin = false;
 let realtimeChannel = null;
 let chartPartner = null, chartCustomer = null, chartTrend = null;
@@ -494,22 +495,46 @@ function waitForMap() {
 
 async function checkAdmin() {
   isAdmin = false;
+  currentUserRole = 'staff';
   if (!currentUser) return;
 
   try {
-    const { data, error } = await sb
-      .from('admins')
-      .select('id')
-      .or(`user_id.eq.${currentUser.id},email.eq.${currentUser.email?.toLowerCase()}`)
-      .maybeSingle();
-    if (error) throw error;
-    isAdmin = !!data;
+    // Preferred v4 permission source: public.profiles.role
+    const roleRes = await sb.rpc('current_user_role');
+    if (!roleRes.error && roleRes.data) {
+      currentUserRole = roleRes.data;
+      isAdmin = roleRes.data === 'admin';
+    } else {
+      // Fallback if RPC is not deployed yet: read profiles directly
+      const { data: profile, error: profileErr } = await sb
+        .from('profiles')
+        .select('role,status')
+        .eq('id', currentUser.id)
+        .maybeSingle();
+      if (profileErr) throw profileErr;
+      currentUserRole = (profile && profile.status === 'active') ? profile.role : 'staff';
+      isAdmin = currentUserRole === 'admin';
+    }
   } catch(e) {
-    console.warn('[checkAdmin] admins table/policy not ready, using bootstrap fallback temporarily', e);
-    // Temporary migration fallback only; remove after admins table + RLS is ready.
-    isAdmin = currentUser.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+    console.warn('[checkAdmin] profiles role not ready, falling back to admins/bootstrap', e);
+    try {
+      const { data } = await sb
+        .from('admins')
+        .select('id')
+        .or(`user_id.eq.${currentUser.id},email.eq.${currentUser.email?.toLowerCase()}`)
+        .maybeSingle();
+      isAdmin = !!data || currentUser.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+      currentUserRole = isAdmin ? 'admin' : 'staff';
+    } catch(_) {
+      isAdmin = currentUser.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
+      currentUserRole = isAdmin ? 'admin' : 'staff';
+    }
   }
-  document.getElementById('admin-btn').style.display = isAdmin ? 'block' : 'none';
+
+  const adminBtn = document.getElementById('admin-btn');
+  if (adminBtn) adminBtn.style.display = isAdmin ? 'block' : 'none';
+  const badge = document.getElementById('user-role-badge');
+  if (badge) badge.textContent = currentUser?.email ? `${currentUser.email} • ${currentUserRole}` : currentUserRole;
 }
 
 function showAuth() {
@@ -542,7 +567,19 @@ async function doRegister() {
   const { error } = await sb.auth.signUp({ email, password: pass });
   msg.textContent = error ? error.message : 'ລົງທະບຽນສຳເລັດ! ກວດ Email ທ່ານ';
 }
-async function doLogout() { await sb.auth.signOut(); }
+async function doLogout() {
+  await sb.auth.signOut({ scope: 'global' });
+  currentUser = null;
+  currentUserRole = 'anonymous';
+  isAdmin = false;
+  const badge = document.getElementById('user-role-badge');
+  if (badge) badge.textContent = '';
+  // Keep business cache, but remove Supabase auth tokens so login screen is forced.
+  Object.keys(localStorage).forEach(k => {
+    if (k.startsWith('sb-') || k.includes('supabase.auth')) localStorage.removeItem(k);
+  });
+  showAuth();
+}
 
 // ===== REALTIME =====
 function setupRealtime() {
