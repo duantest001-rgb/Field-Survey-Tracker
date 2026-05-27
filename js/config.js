@@ -3,7 +3,7 @@ const SUPABASE_URL = 'https://xtzlhrgxbeqiwsighhcp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0emxocmd4YmVxaXdzaWdoaGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNTMzOTksImV4cCI6MjA5MjkyOTM5OX0.NuP-bJrGbCHKUlpm3o_2aRCGxBPjgiYzdZfGkqYGySA';
 // NOTE: anon key can be public only when Supabase RLS is enabled correctly.
 // Admin permission must come from public.profiles.role, not from hardcoded email in frontend.
-const APP_VERSION = 'v6.1.0-stability';
+const APP_VERSION = 'v6.1.1-login-fix';
 
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {

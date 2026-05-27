@@ -15,7 +15,7 @@ sb.auth.onAuthStateChange(async (_event, session) => {
 
 async function startAuthenticatedSession(user) {
   currentUser = user;
-  teardownRealtime();
+  if (typeof teardownRealtime === 'function') teardownRealtime();
 
   const profile = await fetchOrCreateProfile(user);
   currentUserProfile = profile;
@@ -29,8 +29,8 @@ async function startAuthenticatedSession(user) {
 
   showApp();
   await waitForMap();
-  await loadAll({ reason: 'auth' });
-  setupRealtime();
+  if (typeof loadAll === 'function') await loadAll({ reason: 'auth' });
+  if (typeof setupRealtime === 'function') setupRealtime();
 }
 
 function endAuthenticatedSession() {
@@ -39,7 +39,7 @@ function endAuthenticatedSession() {
   currentUserRole = 'anonymous';
   isAdmin = false;
   dataSourceState = { partner: 'remote', customer: 'remote', message: '' };
-  teardownRealtime();
+  if (typeof teardownRealtime === 'function') teardownRealtime();
   updateRoleUI();
   showAuth();
 }
@@ -99,7 +99,7 @@ function showAuth() {
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
-  if (!leafletMap) initMap();
+  if (!leafletMap && typeof initMap === 'function') initMap();
   updateRoleUI();
 }
 function showPendingApproval(profile) {
@@ -162,7 +162,7 @@ function withTimeout(promise, ms = 1200) {
 }
 async function doLogout() {
   try { showToast('ກຳລັງອອກຈາກລະບົບ...', 'info', 1200); } catch (_) {}
-  teardownRealtime();
+  if (typeof teardownRealtime === 'function') teardownRealtime();
 
   // Clear UI/local auth immediately. Do not wait for network.
   clearAuthStorage();
