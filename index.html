@@ -201,6 +201,7 @@
     <div class="topbar-right">
       <button class="icon-btn" id="admin-btn" onclick="showAdmin()" style="display:none">👑 Admin</button>
       <button class="icon-btn" onclick="exportExcel()">📤 Excel</button>
+      <button class="icon-btn" onclick="exportBackupJSON()">💾 Backup</button>
       <button class="icon-btn" onclick="showDash()">📊 ສະຫຼຸບ</button>
       <button class="icon-btn" onclick="doLogout()">ອອກ</button>
     </div>
@@ -276,6 +277,15 @@
       </div>
     </div>
     <div class="admin-card">
+      <div class="admin-card-title">🛟 Backup / Recovery</div>
+      <div style="font-size:0.82rem;color:var(--text2);line-height:1.5;margin-bottom:0.75rem;">ໃຊ້ສ່ວນນີ້ເວລາຂໍ້ມູນບໍ່ຂຶ້ນ, RLS ບັງ, ຫຼືຕ້ອງການກູ້ຈາກ backup JSON.</div>
+      <button class="btn-primary" onclick="exportBackupJSON()">💾 Export Backup JSON</button>
+      <input type="file" id="import-json-file" accept="application/json" style="display:none" onchange="importBackupJSON(this)"/>
+      <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="document.getElementById('import-json-file').click()">📥 Import Backup JSON</button>
+      <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="loadFromCache(true)">📦 Load Local Cache</button>
+      <div id="recovery-info" style="font-size:0.78rem;color:var(--text3);margin-top:8px"></div>
+    </div>
+    <div class="admin-card">
       <div class="admin-card-title">📊 ສະຫຼຸບທີມ</div>
       <div id="admin-team-stats"></div>
     </div>
@@ -341,10 +351,14 @@
 <script>
 const SUPABASE_URL = 'https://xtzlhrgxbeqiwsighhcp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0emxocmd4YmVxaXdzaWdoaGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNTMzOTksImV4cCI6MjA5MjkyOTM5OX0.NuP-bJrGbCHKUlpm3o_2aRCGxBPjgiYzdZfGkqYGySA';
-const ADMIN_EMAIL = 'duan.test001@gmail.com';
+// NOTE: anon key can be public only when Supabase RLS is enabled correctly.
+// Admin permission should come from the public.admins table. Keep this bootstrap only while migrating.
+const BOOTSTRAP_ADMIN_EMAIL = 'duan.test001@gmail.com';
 
 const { createClient } = supabase;
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+});
 
 let currentTab = 'partner';
 let currentView = 'map';
@@ -359,6 +373,9 @@ let currentUser = null;
 let isAdmin = false;
 let realtimeChannel = null;
 let chartPartner = null, chartCustomer = null, chartTrend = null;
+let lastRemoteLoadAt = null;
+let lastRemoteCounts = { partner: 0, customer: 0 };
+let isSyncing = false;
 
 const STATUS_CONFIG = {
   partner: [
@@ -402,13 +419,46 @@ function isValidImageFile(file) {
 window.addEventListener('online', () => { document.getElementById('offline-badge').classList.remove('show'); loadAll(); });
 window.addEventListener('offline', () => { document.getElementById('offline-badge').classList.add('show'); loadFromCache(); });
 
-function saveToCache(key, data) { try { localStorage.setItem('cache_'+key, JSON.stringify(data)); } catch(e){} }
-function loadFromCache() {
-  const p = JSON.parse(localStorage.getItem('cache_partner') || '[]');
-  const c = JSON.parse(localStorage.getItem('cache_customer') || '[]');
-  allData.partner = p; allData.customer = c;
-  renderMarkers(); renderList(); renderDash();
-  if (p.length || c.length) showToast('📵 ໃຊ້ຂໍ້ມູນ offline', 'info');
+function safeJSONParse(raw, fallback) {
+  try { return JSON.parse(raw || ''); } catch(e) { return fallback; }
+}
+function cacheKey(key) { return 'cache_' + key; }
+function backupKey(key) { return 'backup_' + key + '_' + new Date().toISOString().replace(/[:.]/g,'-'); }
+function saveToCache(key, data, options = {}) {
+  try {
+    const oldRaw = localStorage.getItem(cacheKey(key));
+    const oldData = safeJSONParse(oldRaw, []);
+    // Prevent overwriting existing cache with accidental empty server response.
+    if (!options.force && Array.isArray(oldData) && oldData.length > 0 && Array.isArray(data) && data.length === 0) {
+      localStorage.setItem(backupKey(key), JSON.stringify(oldData));
+      console.warn(`[cache] skipped empty overwrite for ${key}; old cache preserved`);
+      return false;
+    }
+    if (oldRaw) localStorage.setItem(backupKey(key), oldRaw);
+    localStorage.setItem(cacheKey(key), JSON.stringify(data || []));
+    localStorage.setItem(cacheKey(key) + '_updated_at', new Date().toISOString());
+    return true;
+  } catch(e) { console.warn('[saveToCache]', e); return false; }
+}
+function getCachedData() {
+  return {
+    partner: safeJSONParse(localStorage.getItem('cache_partner'), []),
+    customer: safeJSONParse(localStorage.getItem('cache_customer'), []),
+    updated_at: localStorage.getItem('cache_partner_updated_at') || localStorage.getItem('cache_customer_updated_at') || null
+  };
+}
+function loadFromCache(manual = false) {
+  const cached = getCachedData();
+  allData.partner = cached.partner; allData.customer = cached.customer;
+  renderMarkers(); renderList(); renderDash(); updateRecoveryInfo();
+  if (cached.partner.length || cached.customer.length) showToast(manual ? '📦 ໂຫຼດຂໍ້ມູນຈາກ local cache ແລ້ວ' : '📵 ໃຊ້ຂໍ້ມູນ offline', 'info', 4000);
+  else showToast('⚠️ ບໍ່ພົບ local cache', 'error', 4000);
+}
+function updateRecoveryInfo() {
+  const el = document.getElementById('recovery-info');
+  if (!el) return;
+  const cached = getCachedData();
+  el.textContent = `Remote: Partner ${lastRemoteCounts.partner}, Customer ${lastRemoteCounts.customer} | Cache: Partner ${cached.partner.length}, Customer ${cached.customer.length}`;
 }
 
 // ===== TOAST =====
@@ -446,20 +496,18 @@ async function checkAdmin() {
   isAdmin = false;
   if (!currentUser) return;
 
-  if (currentUser.email === ADMIN_EMAIL) {
-    isAdmin = true;
-  } else {
-    try {
-      const { data } = await sb
-        .from('admins')
-        .select('id')
-        .or(`user_id.eq.${currentUser.id},email.eq.${currentUser.email}`)
-        .maybeSingle();
-      isAdmin = !!data;
-    } catch(e) {
-      console.error('[checkAdmin]', e);
-      isAdmin = false;
-    }
+  try {
+    const { data, error } = await sb
+      .from('admins')
+      .select('id')
+      .or(`user_id.eq.${currentUser.id},email.eq.${currentUser.email?.toLowerCase()}`)
+      .maybeSingle();
+    if (error) throw error;
+    isAdmin = !!data;
+  } catch(e) {
+    console.warn('[checkAdmin] admins table/policy not ready, using bootstrap fallback temporarily', e);
+    // Temporary migration fallback only; remove after admins table + RLS is ready.
+    isAdmin = currentUser.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
   }
   document.getElementById('admin-btn').style.display = isAdmin ? 'block' : 'none';
 }
@@ -479,7 +527,7 @@ function toggleAuth() {
   document.getElementById('auth-form-register').style.display = isLogin ? 'block' : 'none';
 }
 async function doLogin() {
-  const email = document.getElementById('auth-email').value;
+  const email = document.getElementById('auth-email').value.trim().toLowerCase();
   const pass = document.getElementById('auth-pass').value;
   const msg = document.getElementById('auth-msg');
   msg.textContent = 'ກຳລັງເຂົ້າສູ່ລະບົບ...';
@@ -487,7 +535,7 @@ async function doLogin() {
   msg.textContent = error ? 'Email ຫຼື Password ບໍ່ຖືກຕ້ອງ' : '';
 }
 async function doRegister() {
-  const email = document.getElementById('reg-email').value;
+  const email = document.getElementById('reg-email').value.trim().toLowerCase();
   const pass = document.getElementById('reg-pass').value;
   const msg = document.getElementById('reg-msg');
   msg.textContent = 'ກຳລັງລົງທະບຽນ...';
@@ -596,17 +644,58 @@ function renderMarkers() {
 
 // ===== DATA =====
 async function loadAll() {
+  if (isSyncing) return;
+  isSyncing = true;
   try {
+    const cached = getCachedData();
     const [{ data: p, error: pe }, { data: c, error: ce }] = await Promise.all([
-      sb.from('partners').select('*').order('created_at', { ascending: false }),
-      sb.from('customers').select('*').order('created_at', { ascending: false })
+      sb.from('partners').select('*').is('deleted_at', null).order('created_at', { ascending: false }),
+      sb.from('customers').select('*').is('deleted_at', null).order('created_at', { ascending: false })
     ]);
-    if (!pe) { allData.partner = p || []; saveToCache('partner', allData.partner); }
-    if (!ce) { allData.customer = c || []; saveToCache('customer', allData.customer); }
-    renderMarkers(); renderList(); renderDash();
+
+    // Backward compatibility: old DB may not have deleted_at column yet.
+    let partnerData = p, customerData = c, partnerErr = pe, customerErr = ce;
+    if (pe && String(pe.message || '').includes('deleted_at')) {
+      const res = await sb.from('partners').select('*').order('created_at', { ascending: false });
+      partnerData = res.data; partnerErr = res.error;
+    }
+    if (ce && String(ce.message || '').includes('deleted_at')) {
+      const res = await sb.from('customers').select('*').order('created_at', { ascending: false });
+      customerData = res.data; customerErr = res.error;
+    }
+
+    if (partnerErr) console.error('[loadAll partners]', partnerErr);
+    if (customerErr) console.error('[loadAll customers]', customerErr);
+    if (partnerErr && customerErr) throw partnerErr;
+
+    const nextPartner = partnerErr ? cached.partner : (partnerData || []);
+    const nextCustomer = customerErr ? cached.customer : (customerData || []);
+    lastRemoteCounts = { partner: (partnerData || []).length, customer: (customerData || []).length };
+    lastRemoteLoadAt = new Date().toISOString();
+
+    // Guard: if server suddenly returns empty but local cache has data, do not make the screen look lost.
+    if (!partnerErr && nextPartner.length === 0 && cached.partner.length > 0) {
+      allData.partner = cached.partner;
+      showToast('⚠️ Server ສົ່ງ Partner 0 ລາຍການ — ກຳລັງໃຊ້ cache ເພື່ອກັນຂໍ້ມູນຫາຍ', 'error', 6000);
+    } else {
+      allData.partner = nextPartner;
+      if (!partnerErr) saveToCache('partner', allData.partner);
+    }
+
+    if (!customerErr && nextCustomer.length === 0 && cached.customer.length > 0) {
+      allData.customer = cached.customer;
+      showToast('⚠️ Server ສົ່ງ Customer 0 ລາຍການ — ກຳລັງໃຊ້ cache ເພື່ອກັນຂໍ້ມູນຫາຍ', 'error', 6000);
+    } else {
+      allData.customer = nextCustomer;
+      if (!customerErr) saveToCache('customer', allData.customer);
+    }
+
+    renderMarkers(); renderList(); renderDash(); updateRecoveryInfo();
   } catch(err) {
     console.error('[loadAll]', err);
     loadFromCache();
+  } finally {
+    isSyncing = false;
   }
 }
 
@@ -631,15 +720,30 @@ async function saveRecord() {
     const payload = {
       name, phone, notes, status, lat: editLat, lng: editLng,
       location_name: document.getElementById('loc-status').textContent,
-      created_by: currentUser.id
+      updated_at: new Date().toISOString()
     };
+    if (!id) payload.created_by = currentUser.id;
     if (currentTab === 'partner') payload.business_type = document.getElementById('f-business').value.trim();
     else { payload.customer_type = document.getElementById('f-business').value.trim(); payload.budget = document.getElementById('f-budget').value.trim(); }
     if (photoUrl) payload.photo_url = photoUrl;
     else if (id) { const ex = allData[currentTab].find(r => r.id === id); if (ex?.photo_url) payload.photo_url = ex.photo_url; }
 
-    const { error } = id ? await sb.from(table).update(payload).eq('id', id) : await sb.from(table).insert(payload);
-    if (error) throw error;
+    let result = id
+      ? await sb.from(table).update(payload).eq('id', id).select().maybeSingle()
+      : await sb.from(table).insert(payload).select().maybeSingle();
+    if (result.error && String(result.error.message || '').includes('updated_at')) {
+      delete payload.updated_at;
+      result = id
+        ? await sb.from(table).update(payload).eq('id', id).select().maybeSingle()
+        : await sb.from(table).insert(payload).select().maybeSingle();
+    }
+    if (result.error) throw result.error;
+    if (result.data) {
+      const target = allData[currentTab];
+      const idx = target.findIndex(r => r.id === result.data.id);
+      if (idx >= 0) target[idx] = result.data; else target.unshift(result.data);
+      saveToCache(currentTab, target, { force: true });
+    }
     closeModal();
     showToast(id ? '✅ ແກ້ໄຂສຳເລັດ!' : '✅ ເພີ່ມສຳເລັດ!');
     await loadAll();
@@ -651,13 +755,19 @@ async function saveRecord() {
 async function deleteRecord(id, type = null) {
   if (!isAdmin) { showToast('❌ ມີແຕ່ Admin ທີ່ລຶບໄດ້', 'error'); return; }
   const recordType = type || getRecordTypeById(id);
-  if (!confirm('ທ່ານຕ້ອງການລຶບລາຍການນີ້ບໍ?')) return;
+  if (!confirm('ຍ້າຍລາຍການນີ້ໄປຖັງຂີ້ເຫຍື້ອບໍ? ຈະບໍ່ລຶບຖາວອນຖ້າ DB ມີ deleted_at.')) return;
   const table = tableNameFor(recordType);
-  const { error } = await sb.from(table).delete().eq('id', id);
+  let { error } = await sb.from(table).update({ deleted_at: new Date().toISOString(), deleted_by: currentUser.id }).eq('id', id);
+  if (error && String(error.message || '').includes('deleted_at')) {
+    // Backward compatibility before migration: hard delete only if old schema has no soft-delete columns.
+    ({ error } = await sb.from(table).delete().eq('id', id));
+  }
   document.querySelectorAll('.leaflet-popup-close-button').forEach(b => b.click());
   if (error) { showToast('❌ ລຶບບໍ່ສຳເລັດ: ' + (error.message || ''), 'error', 5000); return; }
-  showToast('🗑️ ລຶບສຳເລັດ');
-  await loadAll();
+  allData[recordType] = allData[recordType].filter(r => r.id !== id);
+  saveToCache(recordType, allData[recordType], { force: true });
+  renderMarkers(); renderList(); renderDash();
+  showToast('🗑️ ຍ້າຍອອກຈາກລາຍການແລ້ວ');
 }
 
 async function uploadPhoto(file) {
@@ -679,6 +789,63 @@ function exportExcel() {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(c), 'ລູກຄ້າ');
   XLSX.writeFile(wb, `survey_${new Date().toISOString().slice(0,10)}.xlsx`);
   showToast('📤 Export Excel ສຳເລັດ!');
+}
+function downloadJSON(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+function exportBackupJSON() {
+  const cached = getCachedData();
+  const payload = {
+    app: 'Field Survey Tracker',
+    version: 'v2-safe-backup',
+    exported_at: new Date().toISOString(),
+    user: currentUser ? { id: currentUser.id, email: currentUser.email } : null,
+    remote_counts: lastRemoteCounts,
+    data: {
+      partner: allData.partner.length ? allData.partner : cached.partner,
+      customer: allData.customer.length ? allData.customer : cached.customer
+    }
+  };
+  downloadJSON(`survey_backup_${new Date().toISOString().slice(0,10)}.json`, payload);
+  showToast('💾 Backup JSON ສຳເລັດ');
+}
+async function importBackupJSON(input) {
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (!confirm('Import backup JSON ເຂົ້າ Supabase ບໍ? ຄວນ Export backup ປັດຈຸບັນກ່ອນ.')) return;
+  try {
+    const raw = await file.text();
+    const parsed = JSON.parse(raw);
+    const partner = parsed.data?.partner || parsed.partner || [];
+    const customer = parsed.data?.customer || parsed.customer || [];
+    const clean = (r) => {
+      const copy = { ...r };
+      delete copy._t;
+      if (!copy.created_by) copy.created_by = currentUser.id;
+      copy.updated_at = new Date().toISOString();
+      return copy;
+    };
+    let pErr = null, cErr = null;
+    if (partner.length) {
+      const res = await sb.from('partners').upsert(partner.map(clean), { onConflict: 'id' });
+      pErr = res.error;
+    }
+    if (customer.length) {
+      const res = await sb.from('customers').upsert(customer.map(clean), { onConflict: 'id' });
+      cErr = res.error;
+    }
+    if (pErr || cErr) throw (pErr || cErr);
+    showToast(`✅ Import ສຳເລັດ: Partner ${partner.length}, Customer ${customer.length}`, 'success', 5000);
+    await loadAll();
+  } catch(err) {
+    console.error('[importBackupJSON]', err);
+    showToast('❌ Import ບໍ່ສຳເລັດ: ' + (err.message || 'JSON ບໍ່ຖືກ'), 'error', 7000);
+  }
 }
 
 // ===== LIST VIEW =====
@@ -722,7 +889,9 @@ function renderList() {
       ${photoHtml}
       <div class="record-actions">
         ${canEdit(rec) ? `<button class="btn-sm primary" onclick="openEditModal('${safeId}')">✏️ ແກ້ໄຂ</button>` : ''}
+        ${rec.phone ? `<a class="btn-sm" href="tel:${escapeAttr(rec.phone)}" style="text-decoration:none">📞 ໂທ</a>` : ''}
         ${rec.lat ? `<button class="btn-sm" onclick="flyTo(${Number(rec.lat)},${Number(rec.lng)})">🗺️ ແຜນທີ່</button>` : ''}
+        ${rec.lat ? `<a class="btn-sm" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${Number(rec.lat)},${Number(rec.lng)}" style="text-decoration:none">🌐 Google Maps</a>` : ''}
         ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${safeId}','${currentTab}')">🗑️</button>` : ''}
       </div>
     </div>`;
@@ -820,6 +989,7 @@ async function loadAdminData() {
     document.getElementById('admin-team-stats').innerHTML = Object.entries(byUser)
       .sort((a,b)=>b[1]-a[1])
       .map(([uid, cnt]) => `<div class="status-row"><span>👤 ${uid.slice(0,8)}...</span><strong>${cnt} ລາຍການ</strong></div>`).join('') || '<div style="color:var(--text3)">ຍັງບໍ່ມີຂໍ້ມູນ</div>';
+    updateRecoveryInfo();
   } catch(e) { console.error(e); }
 }
 
