@@ -608,18 +608,59 @@ async function doRegister() {
   msg.textContent = error ? error.message : 'ລົງທະບຽນສຳເລັດ! ລໍ Admin ກຳນົດສິດ/ເປີດ active';
 }
 async function doLogout() {
-  await sb.auth.signOut({ scope: 'global' });
+  // Robust logout fix: clear Supabase session even if signOut throws,
+  // then force a clean reload back to the login screen.
+  try { showToast('ກຳລັງອອກຈາກລະບົບ...', 'info', 1500); } catch (_) {}
+
+  try { teardownRealtime(); } catch (_) {}
+
+  try {
+    await sb.auth.signOut({ scope: 'local' });
+  } catch (err1) {
+    console.warn('Local signOut failed, continuing cleanup:', err1);
+  }
+
+  try {
+    await sb.auth.signOut();
+  } catch (err2) {
+    console.warn('Default signOut failed, continuing cleanup:', err2);
+  }
+
   currentUser = null;
   currentUserRole = 'anonymous';
   isAdmin = false;
+
   const badge = document.getElementById('user-role-badge');
   if (badge) badge.textContent = '';
-  // Keep business cache, but remove Supabase auth tokens so login screen is forced.
-  Object.keys(localStorage).forEach(k => {
-    if (k.startsWith('sb-') || k.includes('supabase.auth')) localStorage.removeItem(k);
-  });
+
+  // Keep business data cache, but remove all Supabase auth/session keys.
+  try {
+    Object.keys(localStorage).forEach(k => {
+      const key = k.toLowerCase();
+      if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token')) {
+        localStorage.removeItem(k);
+      }
+    });
+  } catch (_) {}
+
+  try {
+    Object.keys(sessionStorage).forEach(k => {
+      const key = k.toLowerCase();
+      if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token')) {
+        sessionStorage.removeItem(k);
+      }
+    });
+  } catch (_) {}
+
   showAuth();
+
+  // Force reload so Supabase client cannot reuse an in-memory session.
+  setTimeout(() => {
+    const cleanUrl = window.location.origin + window.location.pathname + '?logout=' + Date.now();
+    window.location.replace(cleanUrl);
+  }, 250);
 }
+
 
 // ===== REALTIME =====
 function setupRealtime() {
