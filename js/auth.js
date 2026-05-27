@@ -1,19 +1,80 @@
 /* Field Survey Tracker auth.js */
 // ===== AUTH =====
-sb.auth.onAuthStateChange(async (event, session) => {
-  if (session) {
-    currentUser = session.user;
-    showApp();
-    await waitForMap();
-    await checkAdmin();
-    await loadAll();
-    setupRealtime();
-  } else {
-    currentUser = null; isAdmin = false;
-    teardownRealtime();
-    showAuth();
+let authBooting = false;
+
+sb.auth.onAuthStateChange(async (_event, session) => {
+  if (authBooting) return;
+  authBooting = true;
+  try {
+    if (session?.user) await startAuthenticatedSession(session.user);
+    else endAuthenticatedSession();
+  } finally {
+    authBooting = false;
   }
 });
+
+async function startAuthenticatedSession(user) {
+  currentUser = user;
+  teardownRealtime();
+
+  const profile = await fetchOrCreateProfile(user);
+  currentUserProfile = profile;
+  currentUserRole = profile?.role || 'anonymous';
+  updateRoleUI();
+
+  if (!profile || profile.status !== 'active') {
+    showPendingApproval(profile);
+    return;
+  }
+
+  showApp();
+  await waitForMap();
+  await loadAll({ reason: 'auth' });
+  setupRealtime();
+}
+
+function endAuthenticatedSession() {
+  currentUser = null;
+  currentUserProfile = null;
+  currentUserRole = 'anonymous';
+  isAdmin = false;
+  dataSourceState = { partner: 'remote', customer: 'remote', message: '' };
+  teardownRealtime();
+  updateRoleUI();
+  showAuth();
+}
+
+async function fetchOrCreateProfile(user) {
+  if (!user?.id) return null;
+  try {
+    const { data, error } = await sb
+      .from('profiles')
+      .select('id,email,display_name,role,status,team_id,created_at,updated_at')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data;
+  } catch (err) {
+    console.warn('[fetch profile]', err);
+  }
+
+  // Safe fallback for new users. Admin must activate them later.
+  try {
+    const fallback = {
+      id: user.id,
+      email: (user.email || '').toLowerCase(),
+      display_name: user.email || 'New user',
+      role: 'staff',
+      status: 'inactive'
+    };
+    const { data, error } = await sb.from('profiles').upsert(fallback, { onConflict: 'id' }).select('id,email,display_name,role,status,team_id,created_at,updated_at').maybeSingle();
+    if (error) throw error;
+    return data || fallback;
+  } catch (err) {
+    console.warn('[create fallback profile]', err);
+    return null;
+  }
+}
 
 function waitForMap() {
   return new Promise(resolve => {
@@ -24,47 +85,11 @@ function waitForMap() {
 }
 
 async function checkAdmin() {
-  isAdmin = false;
-  currentUserRole = 'staff';
+  // Backward-compatible name used by other files. v6.1 uses profiles.role only.
   if (!currentUser) return;
-
-  try {
-    // Preferred v4 permission source: public.profiles.role
-    const roleRes = await sb.rpc('current_user_role');
-    if (!roleRes.error && roleRes.data) {
-      currentUserRole = roleRes.data;
-      isAdmin = roleRes.data === 'admin';
-    } else {
-      // Fallback if RPC is not deployed yet: read profiles directly
-      const { data: profile, error: profileErr } = await sb
-        .from('profiles')
-        .select('role,status')
-        .eq('id', currentUser.id)
-        .maybeSingle();
-      if (profileErr) throw profileErr;
-      currentUserRole = (profile && profile.status === 'active') ? profile.role : 'staff';
-      isAdmin = currentUserRole === 'admin';
-    }
-  } catch(e) {
-    console.warn('[checkAdmin] profiles role not ready, falling back to admins/bootstrap', e);
-    try {
-      const { data } = await sb
-        .from('admins')
-        .select('id')
-        .or(`user_id.eq.${currentUser.id},email.eq.${currentUser.email?.toLowerCase()}`)
-        .maybeSingle();
-      isAdmin = !!data || currentUser.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
-      currentUserRole = isAdmin ? 'admin' : 'staff';
-    } catch(_) {
-      isAdmin = currentUser.email?.toLowerCase() === BOOTSTRAP_ADMIN_EMAIL.toLowerCase();
-      currentUserRole = isAdmin ? 'admin' : 'staff';
-    }
-  }
-
-  const adminBtn = document.getElementById('admin-btn');
-  if (adminBtn) adminBtn.style.display = isAdmin ? 'block' : 'none';
-  const badge = document.getElementById('user-role-badge');
-  if (badge) badge.textContent = currentUser?.email ? `${currentUser.email} • ${currentUserRole}` : currentUserRole;
+  currentUserProfile = await fetchOrCreateProfile(currentUser);
+  currentUserRole = currentUserProfile?.role || 'anonymous';
+  updateRoleUI();
 }
 
 function showAuth() {
@@ -75,7 +100,22 @@ function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   if (!leafletMap) initMap();
+  updateRoleUI();
 }
+function showPendingApproval(profile) {
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  const msg = document.getElementById('auth-msg') || document.getElementById('reg-msg');
+  if (msg) {
+    const status = profile?.status || 'no profile';
+    msg.textContent = `ບັນຊີນີ້ຍັງບໍ່ພ້ອມໃຊ້ງານ (${status}). ກະລຸນາໃຫ້ Admin ກຳນົດ role/team ແລະເປີດ active.`;
+  }
+  showToast('⏳ ບັນຊີຍັງລໍ Admin ອະນຸມັດ', 'error', 6000);
+  // Prevent stuck sessions for inactive/no-profile users. They can login again after Admin activates them.
+  clearAuthStorage();
+  withTimeout(sb.auth.signOut({ scope: 'local' }), 1000).catch(() => {});
+}
+
 function toggleAuth() {
   const isLogin = document.getElementById('auth-form-login').style.display !== 'none';
   document.getElementById('auth-form-login').style.display = isLogin ? 'none' : 'block';
@@ -96,63 +136,46 @@ async function doRegister() {
   msg.textContent = 'ກຳລັງລົງທະບຽນ...';
   const { data, error } = await sb.auth.signUp({ email, password: pass });
   if (!error && data?.user?.id) {
-    // Trigger in DB should create this automatically; this is a safe fallback.
     await sb.from('profiles').upsert({
       id: data.user.id, email, display_name: email, role: 'staff', status: 'inactive'
     }, { onConflict: 'id' });
   }
   msg.textContent = error ? error.message : 'ລົງທະບຽນສຳເລັດ! ລໍ Admin ກຳນົດສິດ/ເປີດ active';
 }
-async function doLogout() {
-  // Robust logout fix: clear Supabase session even if signOut throws,
-  // then force a clean reload back to the login screen.
-  try { showToast('ກຳລັງອອກຈາກລະບົບ...', 'info', 1500); } catch (_) {}
 
-  try { teardownRealtime(); } catch (_) {}
-
-  try {
-    await sb.auth.signOut({ scope: 'local' });
-  } catch (err1) {
-    console.warn('Local signOut failed, continuing cleanup:', err1);
-  }
-
-  try {
-    await sb.auth.signOut();
-  } catch (err2) {
-    console.warn('Default signOut failed, continuing cleanup:', err2);
-  }
-
-  currentUser = null;
-  currentUserRole = 'anonymous';
-  isAdmin = false;
-
-  const badge = document.getElementById('user-role-badge');
-  if (badge) badge.textContent = '';
-
-  // Keep business data cache, but remove all Supabase auth/session keys.
+function clearAuthStorage() {
   try {
     Object.keys(localStorage).forEach(k => {
       const key = k.toLowerCase();
-      if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token')) {
-        localStorage.removeItem(k);
-      }
+      if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token')) localStorage.removeItem(k);
     });
   } catch (_) {}
-
   try {
     Object.keys(sessionStorage).forEach(k => {
       const key = k.toLowerCase();
-      if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token')) {
-        sessionStorage.removeItem(k);
-      }
+      if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token')) sessionStorage.removeItem(k);
     });
   } catch (_) {}
+}
+function withTimeout(promise, ms = 1200) {
+  return Promise.race([promise, new Promise(resolve => setTimeout(resolve, ms))]);
+}
+async function doLogout() {
+  try { showToast('ກຳລັງອອກຈາກລະບົບ...', 'info', 1200); } catch (_) {}
+  teardownRealtime();
 
+  // Clear UI/local auth immediately. Do not wait for network.
+  clearAuthStorage();
+  currentUser = null;
+  currentUserProfile = null;
+  currentUserRole = 'anonymous';
+  isAdmin = false;
+  updateRoleUI();
   showAuth();
 
-  // Force reload so Supabase client cannot reuse an in-memory session.
-  setTimeout(() => {
-    const cleanUrl = window.location.origin + window.location.pathname + '?logout=' + Date.now();
-    window.location.replace(cleanUrl);
-  }, 250);
+  try { await withTimeout(sb.auth.signOut({ scope: 'local' }), 1200); } catch (err) { console.warn('[logout local]', err); }
+  try { await withTimeout(sb.auth.signOut(), 1200); } catch (err) { console.warn('[logout]', err); }
+
+  const cleanUrl = window.location.origin + window.location.pathname + '?logout=' + Date.now();
+  window.location.replace(cleanUrl);
 }

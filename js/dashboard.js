@@ -1,6 +1,7 @@
 /* Field Survey Tracker dashboard.js */
 // ===== DASHBOARD =====
 function renderDash() {
+  if (currentView !== 'dash') return;
   const today = new Date().toDateString();
   document.getElementById('dash-total-p').textContent = allData.partner.length;
   document.getElementById('dash-total-c').textContent = allData.customer.length;

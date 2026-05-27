@@ -1,6 +1,7 @@
 /* Field Survey Tracker dataService.js */
 // ===== DATA =====
-async function loadAll() {
+async function loadAll(options = {}) {
+  if (!currentUser || !isActiveUser()) return;
   if (isSyncing) return;
   isSyncing = true;
   try {
@@ -25,29 +26,31 @@ async function loadAll() {
     if (customerErr) console.error('[loadAll customers]', customerErr);
     if (partnerErr && customerErr) throw partnerErr;
 
-    const nextPartner = partnerErr ? cached.partner : (partnerData || []);
-    const nextCustomer = customerErr ? cached.customer : (customerData || []);
+    const nextPartner = partnerErr ? filterVisibleRecords(cached.partner) : filterVisibleRecords(partnerData || []);
+    const nextCustomer = customerErr ? filterVisibleRecords(cached.customer) : filterVisibleRecords(customerData || []);
     lastRemoteCounts = { partner: (partnerData || []).length, customer: (customerData || []).length };
     lastRemoteLoadAt = new Date().toISOString();
 
     // Guard: if server suddenly returns empty but local cache has data, do not make the screen look lost.
     if (!partnerErr && nextPartner.length === 0 && cached.partner.length > 0) {
-      allData.partner = cached.partner;
-      showToast('⚠️ Server ສົ່ງ Partner 0 ລາຍການ — ກຳລັງໃຊ້ cache ເພື່ອກັນຂໍ້ມູນຫາຍ', 'error', 6000);
+      allData.partner = filterVisibleRecords(cached.partner);
+      setDataSource('partner', 'cache', 'ກຳລັງໂຊວ໌ Partner ຈາກ Local Cache — Remote DB ສົ່ງ 0 ລາຍການ');
+      showToast('⚠️ Server ສົ່ງ Partner 0 ລາຍການ — ກຳລັງໃຊ້ cache', 'error', 6000);
     } else {
       allData.partner = nextPartner;
-      if (!partnerErr) saveToCache('partner', allData.partner);
+      if (!partnerErr) { saveToCache('partner', allData.partner); setDataSource('partner', 'remote'); }
     }
 
     if (!customerErr && nextCustomer.length === 0 && cached.customer.length > 0) {
-      allData.customer = cached.customer;
-      showToast('⚠️ Server ສົ່ງ Customer 0 ລາຍການ — ກຳລັງໃຊ້ cache ເພື່ອກັນຂໍ້ມູນຫາຍ', 'error', 6000);
+      allData.customer = filterVisibleRecords(cached.customer);
+      setDataSource('customer', 'cache', 'ກຳລັງໂຊວ໌ Customer ຈາກ Local Cache — Remote DB ສົ່ງ 0 ລາຍການ');
+      showToast('⚠️ Server ສົ່ງ Customer 0 ລາຍການ — ກຳລັງໃຊ້ cache', 'error', 6000);
     } else {
       allData.customer = nextCustomer;
-      if (!customerErr) saveToCache('customer', allData.customer);
+      if (!customerErr) { saveToCache('customer', allData.customer); setDataSource('customer', 'remote'); }
     }
 
-    renderMarkers(); renderList(); renderDash(); updateRecoveryInfo();
+    renderCurrentViews(); updateRecoveryInfo();
   } catch(err) {
     console.error('[loadAll]', err);
     loadFromCache();
@@ -66,6 +69,13 @@ async function saveRecord() {
   if (!phone) { showToast('⚠️ ກະລຸນາໃສ່ເບີໂທ', 'error'); return; }
   if (!isValidStatus(currentTab, status)) { showToast('⚠️ ກະລຸນາເລືອກສະຖານະ', 'error'); return; }
   if (editPhotoFile && !isValidImageFile(editPhotoFile)) { showToast('⚠️ ຮູບຕ້ອງເປັນ image ແລະ ບໍ່ເກີນ 5MB', 'error'); return; }
+
+  if (id) {
+    const existing = allData[currentTab].find(r => r.id === id);
+    if (!canEditRecord(existing)) { showToast('❌ ທ່ານບໍ່ມີສິດແກ້ໄຂລາຍການນີ້', 'error'); return; }
+  } else if (!canCreateRecord()) {
+    showToast('❌ ບັນຊີນີ້ບໍ່ມີສິດສ້າງລາຍການ', 'error'); return;
+  }
 
   const saveBtn = document.querySelector('.btn-save');
   saveBtn.disabled = true; saveBtn.textContent = '⏳ ກຳລັງບັນທຶກ...';
@@ -116,7 +126,8 @@ async function saveRecord() {
 }
 
 async function deleteRecord(id, type = null) {
-  if (!isAdmin) { showToast('❌ ມີແຕ່ Admin ທີ່ລຶບໄດ້', 'error'); return; }
+  const existing = [...allData.partner, ...allData.customer].find(r => r.id === id);
+  if (!canDeleteRecord(existing)) { showToast('❌ ທ່ານບໍ່ມີສິດລຶບລາຍການນີ້', 'error'); return; }
   const recordType = type || getRecordTypeById(id);
   if (!confirm('ຍ້າຍລາຍການນີ້ໄປຖັງຂີ້ເຫຍື້ອບໍ? ຈະບໍ່ລຶບຖາວອນຖ້າ DB ມີ deleted_at.')) return;
   const table = tableNameFor(recordType);
@@ -129,7 +140,7 @@ async function deleteRecord(id, type = null) {
   if (error) { showToast('❌ ລຶບບໍ່ສຳເລັດ: ' + (error.message || ''), 'error', 5000); return; }
   allData[recordType] = allData[recordType].filter(r => r.id !== id);
   saveToCache(recordType, allData[recordType], { force: true });
-  renderMarkers(); renderList(); renderDash();
+  renderCurrentViews();
   showToast('🗑️ ຍ້າຍອອກຈາກລາຍການແລ້ວ');
 }
 

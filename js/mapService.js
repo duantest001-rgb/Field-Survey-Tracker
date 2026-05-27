@@ -59,7 +59,7 @@ function renderMarkers() {
   allData[currentTab].forEach(rec => {
     if (!rec.lat || !rec.lng) return;
     const m = L.marker([rec.lat, rec.lng], { icon: makeIcon(rec.status) });
-    const canEdit = isAdmin || rec.created_by === currentUser?.id;
+    const canEdit = canEditRecord(rec);
     const safeId = escapeAttr(rec.id);
     const safeStatus = isValidStatus(currentTab, rec.status) ? rec.status : STATUS_CONFIG[currentTab][0].val;
     const safeName = escapeHTML(rec.name);
@@ -74,7 +74,7 @@ function renderMarkers() {
       <div class="map-popup-info"><span class="status-badge status-${safeStatus}">${escapeHTML(STATUS_LABELS[safeStatus]||safeStatus)}</span></div>
       <div class="map-popup-actions">
         ${canEdit ? `<button class="btn-sm primary" onclick="openEditModal('${safeId}')">✏️ ແກ້ໄຂ</button>` : ''}
-        ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${safeId}','${currentTab}')">🗑️ ລຶບ</button>` : ''}
+        ${canDeleteRecord(rec) ? `<button class="btn-sm danger" onclick="deleteRecord('${safeId}','${currentTab}')">🗑️ ລຶບ</button>` : ''}
       </div></div>`, { maxWidth: 260 });
     clusterGroup.addLayer(m);
     markers[rec.id] = m;

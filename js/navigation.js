@@ -14,16 +14,17 @@ function switchView(view) {
   });
   document.getElementById('dash-view').style.display = 'none';
   document.getElementById('admin-view').style.display = 'none';
-  document.getElementById('fab-btn').style.display = 'flex';
+  document.getElementById('fab-btn').style.display = canCreateRecord() ? 'flex' : 'none';
   document.getElementById('search-bar').classList.toggle('show', view==='list');
   if (view==='map') setTimeout(() => leafletMap.invalidateSize(), 100);
 }
 function showDash() {
+  currentView = 'dash';
   document.getElementById('map-view').style.display = 'none';
   document.getElementById('list-view').style.display = 'none';
   document.getElementById('dash-view').style.display = 'flex';
   document.getElementById('admin-view').style.display = 'none';
-  document.getElementById('fab-btn').style.display = 'flex';
+  document.getElementById('fab-btn').style.display = canCreateRecord() ? 'flex' : 'none';
   document.getElementById('search-bar').classList.remove('show');
   renderDash();
 }

@@ -1,7 +1,8 @@
 /* Field Survey Tracker adminUsersTeams.js */
 // ===== ADMIN: USERS & TEAMS =====
 async function showAdmin() {
-  if (!isAdmin) return;
+  if (!canAccessAdminPanel()) return;
+  currentView = 'admin';
   document.getElementById('map-view').style.display = 'none';
   document.getElementById('list-view').style.display = 'none';
   document.getElementById('dash-view').style.display = 'none';
@@ -144,6 +145,7 @@ async function saveUserProfile(id) {
   };
   const { error } = await sb.from('profiles').update(payload).eq('id', id);
   if (error) { showToast('❌ ບັນທຶກ user ບໍ່ສຳເລັດ: ' + error.message, 'error', 5000); return; }
+  if (currentUser?.id === id) await checkAdmin();
   showToast('✅ ອັບເດດ user ສຳເລັດ');
   await loadAdminData();
 }

@@ -2,9 +2,8 @@
 const SUPABASE_URL = 'https://xtzlhrgxbeqiwsighhcp.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh0emxocmd4YmVxaXdzaWdoaGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNTMzOTksImV4cCI6MjA5MjkyOTM5OX0.NuP-bJrGbCHKUlpm3o_2aRCGxBPjgiYzdZfGkqYGySA';
 // NOTE: anon key can be public only when Supabase RLS is enabled correctly.
-// Admin permission should come from the public.admins table. Keep this bootstrap only while migrating.
-const BOOTSTRAP_ADMIN_EMAIL = 'duan.test001@gmail.com';
-const APP_VERSION = 'v6.0.0-multifile';
+// Admin permission must come from public.profiles.role, not from hardcoded email in frontend.
+const APP_VERSION = 'v6.1.0-stability';
 
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -22,7 +21,10 @@ let editPhotoFile = null;
 let pickingLocation = false;
 let currentUser = null;
 let currentUserRole = 'anonymous';
+let currentUserProfile = null;
 let isAdmin = false;
+let dataSourceState = { partner: 'remote', customer: 'remote', message: '' };
+let realtimeLoadTimer = null;
 let realtimeChannel = null;
 let chartPartner = null, chartCustomer = null, chartTrend = null;
 let lastRemoteLoadAt = null;

@@ -15,7 +15,7 @@ function renderList() {
     if (!q || !safe) return safe;
     return safe.replace(new RegExp(`(${escapeRegExp(q)})`, 'gi'), '<mark class="highlight">$1</mark>');
   }
-  const canEdit = (rec) => isAdmin || rec.created_by === currentUser?.id;
+  const canEdit = (rec) => canEditRecord(rec);
 
   container.innerHTML = data.map(rec => {
     const typeFld = currentTab === 'partner' ? rec.business_type : rec.customer_type;
@@ -43,7 +43,7 @@ function renderList() {
         ${rec.phone ? `<a class="btn-sm" href="tel:${escapeAttr(rec.phone)}" style="text-decoration:none">📞 ໂທ</a>` : ''}
         ${rec.lat ? `<button class="btn-sm" onclick="flyTo(${Number(rec.lat)},${Number(rec.lng)})">🗺️ ແຜນທີ່</button>` : ''}
         ${rec.lat ? `<a class="btn-sm" target="_blank" rel="noopener" href="https://www.google.com/maps?q=${Number(rec.lat)},${Number(rec.lng)}" style="text-decoration:none">🌐 Google Maps</a>` : ''}
-        ${isAdmin ? `<button class="btn-sm danger" onclick="deleteRecord('${safeId}','${currentTab}')">🗑️</button>` : ''}
+        ${canDeleteRecord(rec) ? `<button class="btn-sm danger" onclick="deleteRecord('${safeId}','${currentTab}')">🗑️</button>` : ''}
       </div>
     </div>`;
   }).join('');
