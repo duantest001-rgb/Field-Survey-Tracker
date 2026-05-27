@@ -110,6 +110,22 @@
   .admin-user-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
   .admin-user-row:last-child { border-bottom: none; }
 
+
+  .admin-grid { display: grid; grid-template-columns: 1fr; gap: 0.6rem; }
+  .admin-form-row { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 0.75rem; }
+  .admin-muted { font-size: 0.78rem; color: var(--text3); line-height: 1.45; }
+  .admin-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .admin-table th, .admin-table td { border-bottom: 1px solid var(--border); padding: 8px 6px; text-align: left; vertical-align: middle; }
+  .admin-table th { color: var(--text3); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; }
+  .admin-select { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); font-family: inherit; font-size: 0.78rem; }
+  .team-pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--blue-light); color: var(--blue); font-size: 0.72rem; font-weight: 700; }
+  .role-pill { display: inline-block; padding: 3px 8px; border-radius: 999px; background: var(--green-light); color: var(--green-dark); font-size: 0.72rem; font-weight: 700; }
+  .status-pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; }
+  .status-pill.active { background: var(--green-light); color: var(--green-dark); }
+  .status-pill.inactive { background: var(--red-light); color: var(--red); }
+  @media (min-width: 860px) { .admin-grid { grid-template-columns: 1.2fr 0.8fr; } .admin-form-row { grid-template-columns: 1fr auto; align-items: end; } }
+  @media (max-width: 720px) { .admin-table { display:block; overflow-x:auto; white-space:nowrap; } }
+
   /* MODAL */
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 2000; display: none; align-items: flex-end; justify-content: center; }
   .modal-overlay.open { display: flex; }
@@ -268,26 +284,42 @@
   </div>
 
   <div class="admin-view" id="admin-view">
-    <div class="admin-card">
-      <div class="admin-card-title">👑 ຈັດການ Admin</div>
-      <div id="admin-users-list"><div class="loading">ກຳລັງໂຫຼດ...</div></div>
-      <div style="margin-top:1rem;">
-        <input type="email" class="field-input" id="new-admin-email" placeholder="Email ທີ່ຈະເພີ່ມເປັນ Admin"/>
-        <button class="btn-primary" style="margin-top:8px" onclick="addAdmin()">+ ເພີ່ມ Admin</button>
+    <div class="admin-grid">
+      <div class="admin-card">
+        <div class="admin-card-title">👥 Users & Roles</div>
+        <div class="admin-muted">ຈັດການພະນັກງານ, role, team ແລະ status. User ໃໝ່ຕ້ອງ Register/Login ກ່ອນ ແລ້ວຈະປາກົດໃນລາຍການນີ້.</div>
+        <div id="profiles-list" style="margin-top:0.75rem"><div class="loading">ກຳລັງໂຫຼດ users...</div></div>
       </div>
-    </div>
-    <div class="admin-card">
-      <div class="admin-card-title">🛟 Backup / Recovery</div>
-      <div style="font-size:0.82rem;color:var(--text2);line-height:1.5;margin-bottom:0.75rem;">ໃຊ້ສ່ວນນີ້ເວລາຂໍ້ມູນບໍ່ຂຶ້ນ, RLS ບັງ, ຫຼືຕ້ອງການກູ້ຈາກ backup JSON.</div>
-      <button class="btn-primary" onclick="exportBackupJSON()">💾 Export Backup JSON</button>
-      <input type="file" id="import-json-file" accept="application/json" style="display:none" onchange="importBackupJSON(this)"/>
-      <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="document.getElementById('import-json-file').click()">📥 Import Backup JSON</button>
-      <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="loadFromCache(true)">📦 Load Local Cache</button>
-      <div id="recovery-info" style="font-size:0.78rem;color:var(--text3);margin-top:8px"></div>
-    </div>
-    <div class="admin-card">
-      <div class="admin-card-title">📊 ສະຫຼຸບທີມ</div>
-      <div id="admin-team-stats"></div>
+
+      <div>
+        <div class="admin-card">
+          <div class="admin-card-title">🧩 Teams</div>
+          <div class="admin-muted">ສ້າງທີມ ແລ້ວ assign ໃຫ້ manager/staff.</div>
+          <div class="admin-form-row">
+            <div>
+              <input type="text" class="field-input" id="new-team-name" placeholder="ຊື່ທີມ ເຊັ່ນ Field Survey"/>
+              <input type="text" class="field-input" id="new-team-desc" placeholder="ຄຳອະທິບາຍ" style="margin-top:8px"/>
+            </div>
+            <button class="btn-primary" onclick="createTeam()">+ ສ້າງ Team</button>
+          </div>
+          <div id="teams-list" style="margin-top:0.75rem"><div class="loading">ກຳລັງໂຫຼດ teams...</div></div>
+        </div>
+
+        <div class="admin-card" style="margin-top:0.6rem">
+          <div class="admin-card-title">🛟 Backup / Recovery</div>
+          <div class="admin-muted">ໃຊ້ເວລາຂໍ້ມູນບໍ່ຂຶ້ນ, RLS ບັງ, ຫຼືຕ້ອງການກູ້ຈາກ backup JSON.</div>
+          <button class="btn-primary" style="margin-top:8px" onclick="exportBackupJSON()">💾 Export Backup JSON</button>
+          <input type="file" id="import-json-file" accept="application/json" style="display:none" onchange="importBackupJSON(this)"/>
+          <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="document.getElementById('import-json-file').click()">📥 Import Backup JSON</button>
+          <button class="btn-cancel" style="width:100%;margin-top:8px" onclick="loadFromCache(true)">📦 Load Local Cache</button>
+          <div id="recovery-info" class="admin-muted" style="margin-top:8px"></div>
+        </div>
+
+        <div class="admin-card" style="margin-top:0.6rem">
+          <div class="admin-card-title">📊 Team Summary</div>
+          <div id="admin-team-stats"></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -377,6 +409,8 @@ let chartPartner = null, chartCustomer = null, chartTrend = null;
 let lastRemoteLoadAt = null;
 let lastRemoteCounts = { partner: 0, customer: 0 };
 let isSyncing = false;
+let adminProfiles = [];
+let adminTeams = [];
 
 const STATUS_CONFIG = {
   partner: [
@@ -564,8 +598,14 @@ async function doRegister() {
   const pass = document.getElementById('reg-pass').value;
   const msg = document.getElementById('reg-msg');
   msg.textContent = 'ກຳລັງລົງທະບຽນ...';
-  const { error } = await sb.auth.signUp({ email, password: pass });
-  msg.textContent = error ? error.message : 'ລົງທະບຽນສຳເລັດ! ກວດ Email ທ່ານ';
+  const { data, error } = await sb.auth.signUp({ email, password: pass });
+  if (!error && data?.user?.id) {
+    // Trigger in DB should create this automatically; this is a safe fallback.
+    await sb.from('profiles').upsert({
+      id: data.user.id, email, display_name: email, role: 'staff', status: 'inactive'
+    }, { onConflict: 'id' });
+  }
+  msg.textContent = error ? error.message : 'ລົງທະບຽນສຳເລັດ! ລໍ Admin ກຳນົດສິດ/ເປີດ active';
 }
 async function doLogout() {
   await sb.auth.signOut({ scope: 'global' });
@@ -587,6 +627,8 @@ function setupRealtime() {
   realtimeChannel = sb.channel('survey-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'partners' }, () => { loadAll(); showToast('🔄 ຂໍ້ມູນ Partner ອັບເດດ', 'info', 2000); })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'customers' }, () => { loadAll(); showToast('🔄 ຂໍ້ມູນ ລູກຄ້າ ອັບເດດ', 'info', 2000); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => { if (isAdmin) loadAdminData(); })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, () => { if (isAdmin) loadAdminData(); })
     .subscribe(status => {
       const dot = document.getElementById('rt-dot');
       dot.style.display = status === 'SUBSCRIBED' ? 'inline-block' : 'none';
@@ -759,7 +801,13 @@ async function saveRecord() {
       location_name: document.getElementById('loc-status').textContent,
       updated_at: new Date().toISOString()
     };
-    if (!id) payload.created_by = currentUser.id;
+    if (!id) {
+      payload.created_by = currentUser.id;
+      try {
+        const { data: myProfile } = await sb.from('profiles').select('team_id').eq('id', currentUser.id).maybeSingle();
+        if (myProfile?.team_id) payload.team_id = myProfile.team_id;
+      } catch(_) {}
+    }
     if (currentTab === 'partner') payload.business_type = document.getElementById('f-business').value.trim();
     else { payload.customer_type = document.getElementById('f-business').value.trim(); payload.budget = document.getElementById('f-budget').value.trim(); }
     if (photoUrl) payload.photo_url = photoUrl;
@@ -1001,7 +1049,7 @@ function renderDash() {
   ).join('') || '<div style="color:var(--text3);font-size:0.85rem;padding:8px 0">ຍັງບໍ່ມີຂໍ້ມູນ</div>';
 }
 
-// ===== ADMIN =====
+// ===== ADMIN: USERS & TEAMS =====
 async function showAdmin() {
   if (!isAdmin) return;
   document.getElementById('map-view').style.display = 'none';
@@ -1012,39 +1060,141 @@ async function showAdmin() {
   await loadAdminData();
 }
 
-async function loadAdminData() {
-  try {
-    const { data: admins } = await sb.from('admins').select('*');
-    document.getElementById('admin-users-list').innerHTML = (admins||[]).map(a =>
-      `<div class="admin-user-row"><span>👑 ${escapeHTML(a.email||a.user_id)}</span><button class="btn-sm danger" onclick="removeAdmin('${escapeAttr(a.id)}')">ລຶບ</button></div>`
-    ).join('') || '<div style="color:var(--text3)">ຍັງບໍ່ມີ Admin ເພີ່ມ</div>';
-
-    // team stats
-    const allRecs = [...allData.partner, ...allData.customer];
-    const byUser = {};
-    allRecs.forEach(r => { byUser[r.created_by] = (byUser[r.created_by]||0)+1; });
-    document.getElementById('admin-team-stats').innerHTML = Object.entries(byUser)
-      .sort((a,b)=>b[1]-a[1])
-      .map(([uid, cnt]) => `<div class="status-row"><span>👤 ${uid.slice(0,8)}...</span><strong>${cnt} ລາຍການ</strong></div>`).join('') || '<div style="color:var(--text3)">ຍັງບໍ່ມີຂໍ້ມູນ</div>';
-    updateRecoveryInfo();
-  } catch(e) { console.error(e); }
+function teamNameById(teamId) {
+  if (!teamId) return '—';
+  return adminTeams.find(t => t.id === teamId)?.name || teamId.slice(0, 8) + '...';
+}
+function roleOptions(current) {
+  return ['admin','manager','staff'].map(r => `<option value="${r}" ${current===r?'selected':''}>${r}</option>`).join('');
+}
+function statusOptions(current) {
+  return ['active','inactive'].map(st => `<option value="${st}" ${current===st?'selected':''}>${st}</option>`).join('');
+}
+function teamOptions(current) {
+  return `<option value="">No team</option>` + adminTeams.map(t => `<option value="${escapeAttr(t.id)}" ${current===t.id?'selected':''}>${escapeHTML(t.name)}</option>`).join('');
 }
 
-async function addAdmin() {
-  const email = document.getElementById('new-admin-email').value.trim().toLowerCase();
-  if (!email || !email.includes('@')) { showToast('⚠️ ໃສ່ email ໃຫ້ຖືກຕ້ອງ', 'error'); return; }
-  const { error } = await sb.from('admins').upsert({ email }, { onConflict: 'email' });
-  if (error) { showToast('❌ ເພີ່ມ Admin ບໍ່ສຳເລັດ', 'error'); return; }
-  showToast('✅ ເພີ່ມ Admin ສຳເລັດ');
-  document.getElementById('new-admin-email').value = '';
+async function loadAdminData() {
+  try {
+    const [teamsRes, profilesRes] = await Promise.all([
+      sb.from('teams').select('*').order('created_at', { ascending: true }),
+      sb.from('profiles').select('id,email,display_name,role,status,team_id,created_at,updated_at').order('created_at', { ascending: true })
+    ]);
+    if (teamsRes.error) throw teamsRes.error;
+    if (profilesRes.error) throw profilesRes.error;
+    adminTeams = teamsRes.data || [];
+    adminProfiles = profilesRes.data || [];
+    renderTeamsAdmin();
+    renderProfilesAdmin();
+    renderAdminTeamStats();
+    updateRecoveryInfo();
+  } catch(e) {
+    console.error('[loadAdminData]', e);
+    const target = document.getElementById('profiles-list');
+    if (target) target.innerHTML = `<div class="admin-muted" style="color:var(--red)">ດຶງຂໍ້ມູນ Users/Teams ບໍ່ໄດ້: ${escapeHTML(e.message || e)}</div>`;
+  }
+}
+
+function renderTeamsAdmin() {
+  const el = document.getElementById('teams-list');
+  if (!el) return;
+  if (!adminTeams.length) {
+    el.innerHTML = '<div class="admin-muted">ຍັງບໍ່ມີ team. ສ້າງ Team ກ່ອນ ແລ້ວຈຶ່ງ assign user.</div>';
+    return;
+  }
+  el.innerHTML = adminTeams.map(t => {
+    const members = adminProfiles.filter(p => p.team_id === t.id).length;
+    const records = [...allData.partner, ...allData.customer].filter(r => r.team_id === t.id).length;
+    return `<div class="admin-user-row">
+      <div>
+        <strong>${escapeHTML(t.name)}</strong>
+        <div class="admin-muted">${escapeHTML(t.description || '')}</div>
+        <div class="admin-muted">Members: ${members} • Records: ${records}</div>
+      </div>
+      <button class="btn-sm danger" onclick="deleteTeam('${escapeAttr(t.id)}')">ລຶບ</button>
+    </div>`;
+  }).join('');
+}
+
+function renderProfilesAdmin() {
+  const el = document.getElementById('profiles-list');
+  if (!el) return;
+  if (!adminProfiles.length) {
+    el.innerHTML = '<div class="admin-muted">ຍັງບໍ່ມີ profiles. ໃຫ້ user Register/Login ກ່ອນ ຫຼື run v5 migration backfill.</div>';
+    return;
+  }
+  el.innerHTML = `<table class="admin-table">
+    <thead><tr><th>User</th><th>Role</th><th>Team</th><th>Status</th><th>Save</th></tr></thead>
+    <tbody>
+      ${adminProfiles.map(p => `
+        <tr>
+          <td>
+            <strong>${escapeHTML(p.display_name || p.email || p.id)}</strong>
+            <div class="admin-muted">${escapeHTML(p.email || '')}</div>
+            <div class="admin-muted">${escapeHTML(p.id.slice(0,8))}...</div>
+          </td>
+          <td><select class="admin-select" id="role-${escapeAttr(p.id)}">${roleOptions(p.role)}</select></td>
+          <td><select class="admin-select" id="team-${escapeAttr(p.id)}">${teamOptions(p.team_id)}</select></td>
+          <td><select class="admin-select" id="status-${escapeAttr(p.id)}">${statusOptions(p.status)}</select></td>
+          <td><button class="btn-sm primary" onclick="saveUserProfile('${escapeAttr(p.id)}')">ບັນທຶກ</button></td>
+        </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+function renderAdminTeamStats() {
+  const el = document.getElementById('admin-team-stats');
+  if (!el) return;
+  const allRecs = [...allData.partner.map(r=>({...r,_type:'Partner'})), ...allData.customer.map(r=>({...r,_type:'Customer'}))];
+  const rows = adminTeams.map(t => {
+    const members = adminProfiles.filter(p => p.team_id === t.id).length;
+    const records = allRecs.filter(r => r.team_id === t.id).length;
+    return `<div class="status-row"><span><span class="team-pill">${escapeHTML(t.name)}</span></span><span>${members} users • ${records} records</span></div>`;
+  });
+  const noTeamRecords = allRecs.filter(r => !r.team_id).length;
+  rows.push(`<div class="status-row"><span>— No team</span><span>${noTeamRecords} records</span></div>`);
+  el.innerHTML = rows.join('') || '<div class="admin-muted">ຍັງບໍ່ມີຂໍ້ມູນ</div>';
+}
+
+async function createTeam() {
+  const name = document.getElementById('new-team-name').value.trim();
+  const description = document.getElementById('new-team-desc').value.trim();
+  if (!name) { showToast('⚠️ ໃສ່ຊື່ team ກ່ອນ', 'error'); return; }
+  const { error } = await sb.from('teams').insert({ name, description, created_by: currentUser.id });
+  if (error) { showToast('❌ ສ້າງ team ບໍ່ສຳເລັດ: ' + error.message, 'error', 5000); return; }
+  document.getElementById('new-team-name').value = '';
+  document.getElementById('new-team-desc').value = '';
+  showToast('✅ ສ້າງ team ສຳເລັດ');
   await loadAdminData();
 }
 
-async function removeAdmin(id) {
-  if (!confirm('ລຶບ Admin ນີ້ບໍ?')) return;
-  const { error } = await sb.from('admins').delete().eq('id', id);
-  if (error) { showToast('❌ ລຶບ Admin ບໍ່ສຳເລັດ', 'error'); return; }
-  showToast('🗑️ ລຶບ Admin ສຳເລັດ');
+async function deleteTeam(id) {
+  const members = adminProfiles.filter(p => p.team_id === id).length;
+  const records = [...allData.partner, ...allData.customer].filter(r => r.team_id === id).length;
+  if (members || records) {
+    showToast('⚠️ ລຶບບໍ່ໄດ້: team ນີ້ຍັງມີ user ຫຼື record ຜູກຢູ່', 'error', 5000);
+    return;
+  }
+  if (!confirm('ລຶບ team ນີ້ບໍ?')) return;
+  const { error } = await sb.from('teams').delete().eq('id', id);
+  if (error) { showToast('❌ ລຶບ team ບໍ່ສຳເລັດ: ' + error.message, 'error', 5000); return; }
+  showToast('🗑️ ລຶບ team ແລ້ວ');
+  await loadAdminData();
+}
+
+async function saveUserProfile(id) {
+  const role = document.getElementById(`role-${id}`).value;
+  const status = document.getElementById(`status-${id}`).value;
+  const teamValue = document.getElementById(`team-${id}`).value;
+  const payload = {
+    role,
+    status,
+    team_id: teamValue || null,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = await sb.from('profiles').update(payload).eq('id', id);
+  if (error) { showToast('❌ ບັນທຶກ user ບໍ່ສຳເລັດ: ' + error.message, 'error', 5000); return; }
+  showToast('✅ ອັບເດດ user ສຳເລັດ');
   await loadAdminData();
 }
 
